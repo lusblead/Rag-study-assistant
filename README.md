@@ -1,2 +1,3 @@
-# Rag-study-assistant
-基于RAG的个人课程知识库和智能学习助手系统a
+﻿# Rag-study-assistant
+
+基于 RAG 的个人课程知识库与智能学习助手系统
