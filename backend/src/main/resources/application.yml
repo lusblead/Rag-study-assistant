@@ -1,0 +1,46 @@
+spring:
+  application:
+    name: rag-study-assistant
+
+  autoconfigure:
+    exclude:
+      - org.mybatis.spring.boot.autoconfigure.MybatisAutoConfiguration
+
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/rag_study_assistant?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&createDatabaseIfNotExist=true
+    username: root
+    password: java0975
+
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:db/schema.sql
+      continue-on-error: true
+
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 100MB
+
+# MyBatis 配置已移至 config/MyBatisConfig.java 手动管理
+
+# File upload
+app:
+  upload:
+    dir: ./uploads
+
+# Milvus vector store (Agent module will use this)
+milvus:
+  host: localhost
+  port: 19530
+  collection-name: knowledge_chunk_vectors
+  embedding-dimension: 1536
+
+# RAG settings (Agent module will use this)
+rag:
+  top-k: 5
+
+# Agent mock mode: true = use mock implementations, false = use real services
+agent:
+  mock: true
