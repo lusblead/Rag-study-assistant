@@ -1,0 +1,9 @@
+-- Courses table for RAG study assistant
+CREATE TABLE IF NOT EXISTS courses (
+    id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+    name        VARCHAR(100) NOT NULL COMMENT '课程名称',
+    description VARCHAR(500) COMMENT '课程描述',
+    term        VARCHAR(50)  COMMENT '学期',
+    created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='课程表';
