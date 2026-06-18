@@ -40,7 +40,7 @@ mvn package -pl backend
 
 ## 架构
 
-按功能模块划分的分层架构，包路径 `com.rag.studyassistant`（源码在 `backend/src/main/java/`）：
+按功能模块划分的分层架构，包路径 `com.rag.backend`（源码在 `backend/src/main/java/`）：
 
 ```
 common/       → 统一返回、业务异常、全局异常处理

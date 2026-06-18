@@ -355,7 +355,7 @@ GET /api/courses/{courseId}/practice/wrong-questions
 
 ## 六、给同学C（Agent 模块）的编程接口
 
-> Agent 模块代码位于 `com.rag.studyassistant.agent` 包下，由同学C 负责。
+> Agent 模块代码位于 `com.rag.backend.agent` 包下，由同学C 负责。
 > 基础后端提供以下 Service 方法供 Agent 直接调用（无需走 HTTP）。
 
 ### 6.1 更新文档解析状态
