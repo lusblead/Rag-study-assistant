@@ -5,10 +5,10 @@ import org.springframework.stereotype.Component;
 import java.util.*;
 
 @Component
-public class DocumentParseFactory {
+public class DocumentParserFactory {
     private final List<DocumentParser> parsers;
 
-    public DocumentParseFactory(List<DocumentParser> parsers) {
+    public DocumentParserFactory(List<DocumentParser> parsers) {
         this.parsers = parsers;
     }
 
