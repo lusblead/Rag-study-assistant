@@ -5,6 +5,7 @@ import com.rag.backend.agent.model.KnowledgeChunk;
 import com.rag.backend.agent.model.VectorSearchResult;
 import com.rag.backend.agent.repository.KnowledgeChunkRepository;
 import com.rag.backend.agent.vector.VectorStoreService;
+import com.rag.backend.common.BizException;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
