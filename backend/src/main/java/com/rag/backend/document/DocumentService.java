@@ -26,6 +26,14 @@ public interface DocumentService {
     void delete(Long id);
 
     /**
+     * 根据ID查询文档（供同学C的Agent模块调用）
+     * @param id 文档ID
+     * @return 文档记录
+     * @throws com.rag.backend.common.BizException 文档不存在时抛出
+     */
+    CourseDocument getById(Long id);
+
+    /**
      * 更新文档解析状态（供同学C的Agent模块调用）
      * @param id         文档ID
      * @param status     新状态

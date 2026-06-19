@@ -39,6 +39,10 @@ public class CourseServiceImpl implements CourseService {
 
     @Override
     public void delete(Long id) {
+        Course existing = courseMapper.selectById(id);
+        if (existing == null) {
+            throw new IllegalArgumentException("课程不存在: " + id);
+        }
         courseMapper.deleteById(id);
     }
 }
