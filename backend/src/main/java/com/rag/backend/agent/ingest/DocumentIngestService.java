@@ -56,7 +56,7 @@ public class DocumentIngestService {
             try {
                 List<Double> embedding = embeddingClient.embed(chunk.content());
                 String vectorId = vectorStoreService.upsert(saved, embedding);
-                chunkRepository.updateVectorStatus(saved.getId(), vectorId, "SUCCESS");
+                chunkRepository.updateVectorStatus(saved.getId(), vectorId, "DONE");
             } catch (Exception e) {
                 chunkRepository.updateVectorStatus(saved.getId(), null, "FAILED");
                 throw new BizException("Document chunk embedding failed, chunkId=" + saved.getId());
