@@ -15,7 +15,7 @@ Rag-study-assistant/                          ← 仓库根目录
 └── backend/                                  ← 后端模块（本子项目）
     ├── pom.xml
     └── src/main/
-        ├── java/com/rag/studyassistant/
+        ├── java/com/rag/backend/
         │   ├── BackendApplication.java       ← 启动入口
         │   ├── common/                       ← 统一返回体、业务异常、全局异常处理
         │   │   ├── Result.java
