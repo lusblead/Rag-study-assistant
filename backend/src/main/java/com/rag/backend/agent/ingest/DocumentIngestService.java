@@ -49,17 +49,17 @@ public class DocumentIngestService {
             entity.setContent(chunk.content());
             entity.setSourcePage(chunk.sourcePage());
             entity.setTokenCount(chunk.tokenCount());
-            entity.setEmbeddingStatus("PENDING");
+            entity.setEmbeddingStatus(KnowledgeChunk.STATUS_PENDING);
 
             KnowledgeChunk saved = chunkRepository.save(entity);
 
             try {
                 List<Double> embedding = embeddingClient.embed(chunk.content());
                 String vectorId = vectorStoreService.upsert(saved, embedding);
-                chunkRepository.updateVectorStatus(saved.getId(), vectorId, "DONE");
+                chunkRepository.updateVectorStatus(saved.getId(), vectorId, KnowledgeChunk.STATUS_DONE);
             } catch (Exception e) {
-                chunkRepository.updateVectorStatus(saved.getId(), null, "FAILED");
-                throw new BizException("Document chunk embedding failed, chunkId=" + saved.getId());
+                chunkRepository.updateVectorStatus(saved.getId(), null, KnowledgeChunk.STATUS_FAILED);
+                throw new BizException(500, "Document chunk embedding failed, chunkId=" + saved.getId());
             }
         }
 

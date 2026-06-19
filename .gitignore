@@ -17,3 +17,9 @@ uploads/
 Thumbs.db
 
 backend/docs/Agent进阶教程/
+.cache/
+mysql_data/
+milvus_data/
+minio_data/
+etcd_data/
+uploads_data/

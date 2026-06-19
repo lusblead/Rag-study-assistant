@@ -1,6 +1,5 @@
 package com.rag.backend.agent.ingest;
 
-import com.rag.backend.common.BizException;
 import com.rag.backend.document.DocumentService;
 import com.rag.backend.document.model.CourseDocument;
 import org.springframework.stereotype.Service;
@@ -11,22 +10,22 @@ import java.nio.file.Path;
 public class AgentDocumentIngestService {
     private final DocumentService documentService;
     private final DocumentIngestService documentIngestService;
+    private final AgentDocumentCleanupService cleanupService;
 
     public AgentDocumentIngestService(DocumentService documentService,
-                                      DocumentIngestService documentIngestService) {
+                                      DocumentIngestService documentIngestService,
+                                      AgentDocumentCleanupService cleanupService) {
         this.documentService = documentService;
         this.documentIngestService = documentIngestService;
+        this.cleanupService = cleanupService;
     }
 
     public int ingestDocument(Long documentId) {
         CourseDocument document = documentService.getById(documentId);
-        if (document == null) {
-            throw new BizException(400, "文档不存在，documentId=" + documentId);
-        }
-
         documentService.updateParseStatus(documentId, CourseDocument.STATUS_PARSING, null);
 
         try {
+            cleanupService.cleanupDocument(documentId);
             int chunkCount = documentIngestService.ingest(
                     document.getCourseId(),
                     document.getId(),
