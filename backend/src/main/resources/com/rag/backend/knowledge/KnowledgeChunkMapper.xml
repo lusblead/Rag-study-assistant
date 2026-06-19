@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.rag.backend.knowledge.KnowledgeChunkMapper">
+
+    <resultMap id="KnowledgeChunkMap" type="com.rag.backend.agent.model.KnowledgeChunk">
+        <id property="id" column="id"/>
+        <result property="courseId" column="course_id"/>
+        <result property="documentId" column="document_id"/>
+        <result property="chunkIndex" column="chunk_index"/>
+        <result property="title" column="title"/>
+        <result property="content" column="content"/>
+        <result property="sourcePage" column="source_page"/>
+        <result property="tokenCount" column="token_count"/>
+        <result property="milvusVectorId" column="milvus_vector_id"/>
+        <result property="embeddingStatus" column="embedding_status"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO knowledge_chunks (course_id, document_id, chunk_index, title, content,
+                                       source_page, token_count, milvus_vector_id, embedding_status)
+        VALUES (#{courseId}, #{documentId}, #{chunkIndex}, #{title}, #{content},
+                #{sourcePage}, #{tokenCount}, #{milvusVectorId}, #{embeddingStatus})
+    </insert>
+
+    <select id="selectById" resultMap="KnowledgeChunkMap">
+        SELECT * FROM knowledge_chunks WHERE id = #{id}
+    </select>
+
+    <update id="updateVectorStatus">
+        UPDATE knowledge_chunks
+        SET milvus_vector_id = #{milvusVectorId},
+            embedding_status = #{embeddingStatus}
+        WHERE id = #{id}
+    </update>
+
+</mapper>
