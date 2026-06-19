@@ -22,6 +22,9 @@ public interface DocumentMapper {
     @Update("UPDATE documents SET parse_status=#{parseStatus}, chunk_count=#{chunkCount} WHERE id=#{id}")
     int updateParseStatus(CourseDocument doc);
 
+    @Delete("DELETE FROM knowledge_chunks WHERE document_id = #{documentId}")
+    int deleteKnowledgeChunksByDocumentId(Long documentId);
+
     @Delete("DELETE FROM documents WHERE id = #{id}")
     int deleteById(Long id);
 }

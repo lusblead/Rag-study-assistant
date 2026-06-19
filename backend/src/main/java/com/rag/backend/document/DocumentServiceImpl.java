@@ -1,7 +1,9 @@
 package com.rag.backend.document;
 
+import com.rag.backend.common.BizException;
 import com.rag.backend.course.CourseMapper;
 import com.rag.backend.document.model.CourseDocument;
+import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -23,9 +25,17 @@ public class DocumentServiceImpl implements DocumentService {
     @Value("${app.upload.dir:./uploads}")
     private String uploadBaseDir;
 
+    /** 解析后的绝对路径根目录，避免相对路径受 Tomcat 工作目录影响 */
+    private Path uploadBasePath;
+
     public DocumentServiceImpl(DocumentMapper documentMapper, CourseMapper courseMapper) {
         this.documentMapper = documentMapper;
         this.courseMapper = courseMapper;
+    }
+
+    @PostConstruct
+    private void init() {
+        this.uploadBasePath = Paths.get(uploadBaseDir).toAbsolutePath().normalize();
     }
 
     @Override
@@ -48,9 +58,9 @@ public class DocumentServiceImpl implements DocumentService {
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
         String storedFilename = timestamp + "_" + originalFilename;
 
-        // 5. 构建存储路径
+        // 5. 构建存储路径（使用绝对路径，避免受 Tomcat 工作目录影响）
         String relativePath = "documents/" + courseId + "/" + storedFilename;
-        Path targetPath = Paths.get(uploadBaseDir, relativePath);
+        Path targetPath = uploadBasePath.resolve(relativePath);
 
         try {
             Files.createDirectories(targetPath.getParent());
@@ -64,7 +74,7 @@ public class DocumentServiceImpl implements DocumentService {
         document.setCourseId(courseId);
         document.setFilename(originalFilename);
         document.setFileType(fileType);
-        document.setFilePath(targetPath.toString());
+        document.setFilePath(targetPath.toAbsolutePath().toString());
         document.setParseStatus(CourseDocument.STATUS_UPLOADED);
         document.setChunkCount(0);
 
@@ -78,13 +88,27 @@ public class DocumentServiceImpl implements DocumentService {
     }
 
     @Override
+    public CourseDocument getById(Long id) {
+        CourseDocument document = documentMapper.selectById(id);
+        if (document == null) {
+            throw new BizException(404, "文档不存在: " + id);
+        }
+        return document;
+    }
+
+    @Override
     public void delete(Long id) {
         CourseDocument document = documentMapper.selectById(id);
         if (document == null) {
-            throw new IllegalArgumentException("文档不存在: " + id);
+            throw new BizException(404, "文档不存在: " + id);
         }
 
-        // 删除本地文件
+        // 1. 删除关联的知识片段（MySQL）
+        //    TODO: 同步删除 Milvus 向量 —— 当前 Mock 模式下 VectorStoreService 为内存实现，
+        //          后续接入真实 Milvus 后需在此处调用 VectorStoreService.deleteByDocumentId(documentId)
+        documentMapper.deleteKnowledgeChunksByDocumentId(id);
+
+        // 2. 删除本地文件
         try {
             Path filePath = Paths.get(document.getFilePath());
             Files.deleteIfExists(filePath);
@@ -92,7 +116,7 @@ public class DocumentServiceImpl implements DocumentService {
             // 文件删除失败不影响数据库记录的删除
         }
 
-        // 删除数据库记录
+        // 3. 删除 documents 记录
         documentMapper.deleteById(id);
     }
 
@@ -100,7 +124,7 @@ public class DocumentServiceImpl implements DocumentService {
     public void updateParseStatus(Long id, String status, Integer chunkCount) {
         CourseDocument document = documentMapper.selectById(id);
         if (document == null) {
-            throw new IllegalArgumentException("文档不存在: " + id);
+            throw new BizException(404, "文档不存在: " + id);
         }
         document.setParseStatus(status);
         if (chunkCount != null) {
