@@ -9,9 +9,25 @@ import reactor.core.publisher.Flux;
 public class MockChatClient implements ChatClient {
     @Override
     public String call(String prompt) {
-        return "这是 Mock AI 回答。当前已经完成 RAG 流程编排，真实回答需要接入大模型。\n\n" +
-                "以下是收到的 Prompt 前 300 个字符：\n" +
-                prompt.substring(0, Math.min(prompt.length(), 300));
+        if (prompt != null && prompt.contains("JSON") && prompt.contains("type")) {
+            return """
+                    [
+                      {
+                        "type": "single_choice",
+                        "stem": "Mock question: which statement follows the retrieved course material?",
+                        "options": ["A. Use retrieved material", "B. Ignore retrieved material", "C. Guess randomly", "D. Avoid references"],
+                        "answer": "A",
+                        "explanation": "Mock output for validating the AI question generation pipeline.",
+                        "difficulty": "medium",
+                        "knowledgePoint": "RAG question generation",
+                        "sourceChunkId": null
+                      }
+                    ]
+                    """;
+        }
+        return "Mock AI answer. The RAG orchestration is working; configure a real model for production answers.\n\n"
+                + "Prompt preview:\n"
+                + prompt.substring(0, Math.min(prompt.length(), 300));
     }
 
     @Override

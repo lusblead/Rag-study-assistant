@@ -8,9 +8,9 @@ spring:
 
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/rag_study_assistant?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&createDatabaseIfNotExist=true
-    username: root
-    password: java0975
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/rag_study_assistant?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&createDatabaseIfNotExist=true}
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:root}
 
   sql:
     init:
@@ -23,34 +23,30 @@ spring:
       max-file-size: 100MB
       max-request-size: 100MB
 
-# MyBatis 配置已移至 config/MyBatisConfig.java 手动管理
-
-# File upload
 app:
   upload:
-    dir: ./uploads
+    dir: ${APP_UPLOAD_DIR:./uploads}
 
-# Milvus vector store (Agent module will use this)
 milvus:
-  host: localhost
-  port: 19530
-  collection-name: knowledge_chunk_vectors
-  embedding-dimension: 1536
+  host: ${MILVUS_HOST:localhost}
+  port: ${MILVUS_PORT:19530}
+  collection-name: ${MILVUS_COLLECTION:knowledge_chunk_vectors}
+  embedding-dimension: ${EMBEDDING_DIMENSION:1536}
 
-# RAG settings (Agent module will use this)
 rag:
-  top-k: 5
+  top-k: ${RAG_TOP_K:5}
 
-# Agent mock mode: true = use mock implementations, false = use real services
 agent:
-  mock: false
+  # false = use MilvusVectorStoreService + LocalHashEmbeddingClient + LocalChatClient by default.
+  # true  = use pure in-memory mocks for quick backend-only debugging.
+  mock: ${AGENT_MOCK:false}
 
 llm:
-  provider: your-provider
+  provider: ${LLM_PROVIDER:local}
   api-key: ${LLM_API_KEY:}
-  model: your-model
+  model: ${LLM_MODEL:local-rag-chat}
 
 embedding:
-  provider: your-provider
+  provider: ${EMBEDDING_PROVIDER:local}
   api-key: ${EMBEDDING_API_KEY:}
-  model: your-embedding-model
+  model: ${EMBEDDING_MODEL:local-hash-embedding}

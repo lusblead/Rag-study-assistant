@@ -15,22 +15,26 @@ public class MyBatisKnowledgeChunkRepository implements KnowledgeChunkRepository
     }
 
     @Override
-    public KnowledgeChunk save(KnowledgeChunk chunk){
+    public KnowledgeChunk save(KnowledgeChunk chunk) {
         mapper.insert(chunk);
         return chunk;
     }
 
     @Override
-    public KnowledgeChunk findById(long id){
+    public KnowledgeChunk findById(long id) {
         return mapper.selectById(id);
     }
 
     @Override
-    public void updateVectorStatus(Long chunkId,String milvusVectorId,String embeddingStatus){
-        KnowledgeChunk chunk = mapper.selectById(chunkId);
-        if(chunk == null){
-            throw new BizException(400,"知识片段不存在，chunkId=" + chunkId);
+    public void deleteByDocumentId(long documentId) {
+        mapper.deleteByDocumentId(documentId);
+    }
 
+    @Override
+    public void updateVectorStatus(Long chunkId, String milvusVectorId, String embeddingStatus) {
+        KnowledgeChunk chunk = mapper.selectById(chunkId);
+        if (chunk == null) {
+            throw new BizException(400, "Knowledge chunk does not exist, chunkId=" + chunkId);
         }
         chunk.setMilvusVectorId(milvusVectorId);
         chunk.setEmbeddingStatus(embeddingStatus);

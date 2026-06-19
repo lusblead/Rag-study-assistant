@@ -17,6 +17,9 @@ public interface KnowledgeChunkMapper {
     @Select("SELECT * FROM knowledge_chunks WHERE id = #{id}")
     KnowledgeChunk selectById(Long id);
 
+    @Delete("DELETE FROM knowledge_chunks WHERE document_id = #{documentId}")
+    int deleteByDocumentId(long documentId);
+
     @Update("""
             UPDATE knowledge_chunks
             SET milvus_vector_id = #{milvusVectorId}, embedding_status = #{embeddingStatus}

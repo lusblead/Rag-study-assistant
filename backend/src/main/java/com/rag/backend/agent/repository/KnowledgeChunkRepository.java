@@ -5,5 +5,7 @@ public interface KnowledgeChunkRepository {
 
     KnowledgeChunk findById(long id);
 
+    void deleteByDocumentId(long documentId);
+
     void updateVectorStatus(Long chunkId,String milvusVectorId,String embeddingStatus);
 }

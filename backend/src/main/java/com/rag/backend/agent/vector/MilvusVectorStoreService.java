@@ -4,7 +4,6 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.rag.backend.agent.model.KnowledgeChunk;
 import com.rag.backend.agent.model.VectorSearchResult;
-import com.rag.backend.agent.repository.KnowledgeChunkRepository;
 import io.milvus.v2.client.ConnectConfig;
 import io.milvus.v2.client.MilvusClientV2;
 import io.milvus.v2.common.DataType;
@@ -30,34 +29,25 @@ import java.util.List;
 @Service
 @ConditionalOnProperty(name = "agent.mock", havingValue = "false")
 public class MilvusVectorStoreService implements VectorStoreService {
-
     private static final Logger log = LoggerFactory.getLogger(MilvusVectorStoreService.class);
 
     private final MilvusClientV2 client;
-    private final KnowledgeChunkRepository chunkRepository1;
     private final String collectionName;
     private final int embeddingDimension;
     private final Gson gson = new Gson();
 
-    public MilvusVectorStoreService(
-            @Value("${milvus.host}") String host,
-            @Value("${milvus.port}") int port,
-            @Value("${milvus.collection-name}") String collectionName,
-            @Value("${milvus.embedding-dimension}") int embeddingDimension,
-            KnowledgeChunkRepository chunkRepository1) {
+    public MilvusVectorStoreService(@Value("${milvus.host}") String host,
+                                    @Value("${milvus.port}") int port,
+                                    @Value("${milvus.collection-name}") String collectionName,
+                                    @Value("${milvus.embedding-dimension}") int embeddingDimension) {
         this.collectionName = collectionName;
         this.embeddingDimension = embeddingDimension;
-        this.chunkRepository1 = chunkRepository1;
-
         ConnectConfig config = ConnectConfig.builder()
                 .uri("http://" + host + ":" + port)
                 .build();
         this.client = new MilvusClientV2(config);
-
         initCollection();
     }
-
-    // ── 初始化 collection ──────────────────────────────────────────────
 
     private void initCollection() {
         HasCollectionReq hasReq = HasCollectionReq.builder()
@@ -67,7 +57,6 @@ public class MilvusVectorStoreService implements VectorStoreService {
             log.info("Milvus collection '{}' already exists", collectionName);
             return;
         }
-        log.info("Creating Milvus collection '{}' (dimension={})", collectionName, embeddingDimension);
 
         CreateCollectionReq.CollectionSchema schema = client.createSchema();
         schema.addField(AddFieldReq.builder()
@@ -90,10 +79,8 @@ public class MilvusVectorStoreService implements VectorStoreService {
                 .indexParams(Collections.singletonList(indexParam))
                 .build();
         client.createCollection(createReq);
-        log.info("Milvus collection '{}' created", collectionName);
+        log.info("Milvus collection '{}' created with dimension {}", collectionName, embeddingDimension);
     }
-
-    // ── 写入 / 更新向量 ───────────────────────────────────────────────
 
     @Override
     public String upsert(KnowledgeChunk chunk, List<Double> embedding) {
@@ -108,13 +95,8 @@ public class MilvusVectorStoreService implements VectorStoreService {
                 .data(Collections.singletonList(row))
                 .build();
         client.upsert(req);
-
-        String milvusVectorId = String.valueOf(chunk.getId());
-        chunkRepository1.updateVectorStatus(chunk.getId(), milvusVectorId, "DONE");
-        return milvusVectorId;
+        return String.valueOf(chunk.getId());
     }
-
-    // ── 向量相似搜索 ──────────────────────────────────────────────────
 
     @Override
     public List<VectorSearchResult> search(Long courseId, List<Double> queryVector, int topK) {
@@ -129,7 +111,7 @@ public class MilvusVectorStoreService implements VectorStoreService {
         SearchResp resp = client.search(req);
         List<List<SearchResp.SearchResult>> searchResults = resp.getSearchResults();
         if (searchResults.isEmpty()) {
-            return List.of();
+            return Collections.emptyList();
         }
 
         List<VectorSearchResult> results = new ArrayList<>();
@@ -140,8 +122,6 @@ public class MilvusVectorStoreService implements VectorStoreService {
         return results;
     }
 
-    // ── 按文档删除向量 ───────────────────────────────────────────────
-
     @Override
     public void deleteByDocumentId(Long documentId) {
         DeleteReq req = DeleteReq.builder()
@@ -151,12 +131,10 @@ public class MilvusVectorStoreService implements VectorStoreService {
         client.delete(req);
     }
 
-    // ── 类型转换工具 ──────────────────────────────────────────────────
-
     private List<Float> toFloatList(List<Double> embedding) {
         List<Float> floats = new ArrayList<>(embedding.size());
-        for (Double d : embedding) {
-            floats.add(d.floatValue());
+        for (Double value : embedding) {
+            floats.add(value.floatValue());
         }
         return floats;
     }
