@@ -43,4 +43,14 @@ rag:
 
 # Agent mock mode: true = use mock implementations, false = use real services
 agent:
-  mock: true
+  mock: false
+
+llm:
+  provider: your-provider
+  api-key: ${LLM_API_KEY:}
+  model: your-model
+
+embedding:
+  provider: your-provider
+  api-key: ${EMBEDDING_API_KEY:}
+  model: your-embedding-model

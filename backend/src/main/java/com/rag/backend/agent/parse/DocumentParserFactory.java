@@ -1,8 +1,9 @@
 package com.rag.backend.agent.parse;
 
+import com.rag.backend.common.BizException;
 import org.springframework.stereotype.Component;
 
-import java.util.*;
+import java.util.List;
 
 @Component
 public class DocumentParserFactory {
@@ -16,6 +17,6 @@ public class DocumentParserFactory {
         return parsers.stream()
                 .filter(parser ->parser.supports(fileType))
                 .findFirst()
-                .orElseThrow(() -> new RuntimeException("不支持的文件类型： " + fileType));
+                .orElseThrow(() -> new BizException(400, "不支持的文件类型：" + fileType));
     }
 }

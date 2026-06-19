@@ -1,12 +1,12 @@
 package com.rag.backend.agent.embedding;
 
-import org.springframework.context.annotation.Primary;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
 
-@Primary
+@ConditionalOnProperty(name = "agent.mock", havingValue = "true", matchIfMissing = true)
 @Component
 //模拟embedding逻辑
 public class MockEmbeddingClient implements EmbeddingClient {
