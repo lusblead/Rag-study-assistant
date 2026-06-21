@@ -5,6 +5,8 @@ import com.rag.backend.common.BizException;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
+
 @Primary
 @Repository
 public class MyBatisKnowledgeChunkRepository implements KnowledgeChunkRepository {
@@ -23,6 +25,11 @@ public class MyBatisKnowledgeChunkRepository implements KnowledgeChunkRepository
     @Override
     public KnowledgeChunk findById(long id) {
         return mapper.selectById(id);
+    }
+
+    @Override
+    public List<KnowledgeChunk> findByCourseId(long courseId, int limit) {
+        return mapper.selectByCourseId(courseId, Math.max(1, limit));
     }
 
     @Override

@@ -2,7 +2,7 @@ package com.rag.backend.agent.vector;
 
 import com.rag.backend.agent.model.KnowledgeChunk;
 import com.rag.backend.agent.model.VectorSearchResult;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -12,7 +12,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Service
-@ConditionalOnProperty(name = "agent.mock", havingValue = "true", matchIfMissing = true)
+@ConditionalOnExpression("'${agent.mock:false}' == 'true' || '${vector.provider:milvus}' == 'local'")
 public class MockVectorStoreService implements VectorStoreService {
     private final Map<Long, StoredVector> vectors = new ConcurrentHashMap<>();
 

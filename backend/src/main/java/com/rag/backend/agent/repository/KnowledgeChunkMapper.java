@@ -3,6 +3,8 @@ package com.rag.backend.agent.repository;
 import com.rag.backend.agent.model.KnowledgeChunk;
 import org.apache.ibatis.annotations.*;
 
+import java.util.List;
+
 @Mapper
 public interface KnowledgeChunkMapper {
     @Insert("""
@@ -16,6 +18,14 @@ public interface KnowledgeChunkMapper {
 
     @Select("SELECT * FROM knowledge_chunks WHERE id = #{id}")
     KnowledgeChunk selectById(Long id);
+
+    @Select("""
+            SELECT * FROM knowledge_chunks
+            WHERE course_id = #{courseId}
+            ORDER BY created_at DESC, id DESC
+            LIMIT #{limit}
+            """)
+    List<KnowledgeChunk> selectByCourseId(@Param("courseId") long courseId, @Param("limit") int limit);
 
     @Delete("DELETE FROM knowledge_chunks WHERE document_id = #{documentId}")
     int deleteByDocumentId(long documentId);
