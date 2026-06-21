@@ -59,7 +59,8 @@ public class DocumentIngestService {
                 chunkRepository.updateVectorStatus(saved.getId(), vectorId, KnowledgeChunk.STATUS_DONE);
             } catch (Exception e) {
                 chunkRepository.updateVectorStatus(saved.getId(), null, KnowledgeChunk.STATUS_FAILED);
-                throw new BizException(500, "Document chunk embedding failed, chunkId=" + saved.getId());
+                throw new BizException(500, "Document chunk embedding failed, chunkId="
+                        + saved.getId() + ": " + e.getMessage());
             }
         }
 

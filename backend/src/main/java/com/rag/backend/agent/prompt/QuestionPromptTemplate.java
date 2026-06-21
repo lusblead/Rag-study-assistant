@@ -10,24 +10,36 @@ import java.util.stream.Collectors;
 public class QuestionPromptTemplate {
     public String render(String requirement, List<RetrievedChunk> chunks) {
         String references = chunks.stream()
-                .map(chunk -> "片段ID：" + chunk.chunkId() + "\n" + chunk.content())
-                .collect(Collectors.joining("\n\n"));
+                .map(chunk -> """
+                        [chunkId=%s]
+                        %s
+                        """.formatted(chunk.chunkId(), chunk.content()))
+                .collect(Collectors.joining("\n"));
 
         return """
-                你是课程出题助手，请严格基于课程资料出题。
+                You are a course question-generation assistant.
+                Generate questions strictly from the provided course material.
 
-                【出题要求】
+                User requirement:
                 %s
 
-                【课程资料】
+                Course material:
                 %s
 
-                请输出 JSON 数组，每个元素包含：
-                type, stem, options, answer, explanation, difficulty, knowledgePoint, sourceChunkId。
+                Return ONLY a valid JSON array. Do not wrap it in markdown fences.
+                Each array item must be an object with exactly these fields:
+                - type: one of "single_choice", "multi_choice", "true_false", "short_answer"
+                - stem: question text
+                - options: an array of option strings, or null for short_answer
+                - answer: standard answer. Use "A" for single choice, "AB" for multi choice, "正确"/"错误" for true_false
+                - explanation: concise explanation grounded in the material
+                - difficulty: one of "easy", "medium", "hard"
+                - knowledgePoint: short knowledge point name
+                - sourceChunkId: numeric chunkId from the course material
 
-                题型 type 只能是：single_choice, multi_choice, true_false, short_answer。
-                难度 difficulty 只能是：easy, medium, hard。
-                options 必须是 JSON 数组字符串；简答题可以为 null。
+                For choice questions, options must use visible labels like:
+                ["A. ...", "B. ...", "C. ...", "D. ..."]
+                Use Chinese for stem, options, answer, explanation, and knowledgePoint unless the user requirement clearly asks otherwise.
                 """.formatted(requirement, references);
     }
 }

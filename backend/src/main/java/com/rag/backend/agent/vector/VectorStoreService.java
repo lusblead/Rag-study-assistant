@@ -11,4 +11,6 @@ public interface VectorStoreService {
     List<VectorSearchResult> search(Long courseId,List<Double> queryVector,int topK);
 
     void deleteByDocumentId(Long documentId);
+
+    void deleteByCourseId(Long courseId);
 }

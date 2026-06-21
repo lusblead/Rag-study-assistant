@@ -33,4 +33,7 @@ public interface QuestionMapper {
 
     @Delete("DELETE FROM questions WHERE id = #{id}")
     int deleteById(Long id);
+
+    @Delete("DELETE FROM questions WHERE course_id = #{courseId}")
+    int deleteByCourseId(Long courseId);
 }

@@ -1,6 +1,7 @@
 target/
 *.class
 *.log
+*.tsbuildinfo
 
 node_modules/
 dist/
@@ -12,6 +13,7 @@ dist/
 *.local
 
 uploads/
+release/
 
 .DS_Store
 Thumbs.db

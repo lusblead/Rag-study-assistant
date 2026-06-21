@@ -6,4 +6,8 @@ public record RetrievedChunk(
         String title,
         String content,
         Double score
-) {}
+) {
+    public RetrievedChunk withScore(Double newScore) {
+        return new RetrievedChunk(chunkId, documentId, title, content, newScore);
+    }
+}

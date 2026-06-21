@@ -21,4 +21,7 @@ public interface PracticeMapper {
 
     @Select("SELECT * FROM practice_records WHERE course_id = #{courseId} AND is_correct = FALSE ORDER BY created_at DESC")
     List<PracticeRecord> selectWrongByCourseId(Long courseId);
+
+    @Delete("DELETE FROM practice_records WHERE course_id = #{courseId}")
+    int deleteByCourseId(Long courseId);
 }

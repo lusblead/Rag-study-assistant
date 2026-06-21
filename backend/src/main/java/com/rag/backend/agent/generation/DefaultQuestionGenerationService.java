@@ -1,10 +1,9 @@
 package com.rag.backend.agent.generation;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rag.backend.agent.llm.ChatClient;
-import com.rag.backend.agent.model.GeneratedQuestionItem;
 import com.rag.backend.agent.prompt.QuestionPromptTemplate;
 import com.rag.backend.agent.retrieval.KnowledgeRetriever;
 import com.rag.backend.agent.retrieval.RetrievedChunk;
@@ -16,23 +15,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
 @Service
 public class DefaultQuestionGenerationService implements QuestionGenerationService {
-    private static final Set<String> ALLOWED_TYPES = Set.of(
-            Question.TYPE_SINGLE_CHOICE,
-            Question.TYPE_MULTI_CHOICE,
-            Question.TYPE_TRUE_FALSE,
-            Question.TYPE_SHORT_ANSWER
-    );
-    private static final Set<String> ALLOWED_DIFFICULTIES = Set.of(
-            Question.DIFF_EASY,
-            Question.DIFF_MEDIUM,
-            Question.DIFF_HARD
-    );
-
     private final KnowledgeRetriever knowledgeRetriever;
     private final QuestionService questionService;
     private final QuestionPromptTemplate promptTemplate;
@@ -62,10 +51,20 @@ public class DefaultQuestionGenerationService implements QuestionGenerationServi
 
     @Override
     public List<Question> generateAndSave(Long courseId, String requirement) {
+        if (courseId == null) {
+            throw new BizException(400, "courseId cannot be empty");
+        }
+        if (!StringUtils.hasText(requirement)) {
+            throw new BizException(400, "requirement cannot be empty");
+        }
+
         List<RetrievedChunk> chunks = knowledgeRetriever.retrieve(courseId, requirement, topK);
+        if (chunks.isEmpty()) {
+            throw new BizException(400, "No parsed knowledge chunks were retrieved for this course. Upload and ingest course material first.");
+        }
+
         String prompt = promptTemplate.render(requirement, chunks);
         String response = chatClient.call(prompt);
-
         List<Question> questions = parseQuestions(courseId, response, chunks);
         if (questions.isEmpty()) {
             questions.add(fallbackQuestion(courseId, chunks));
@@ -74,86 +73,307 @@ public class DefaultQuestionGenerationService implements QuestionGenerationServi
     }
 
     private List<Question> parseQuestions(Long courseId, String response, List<RetrievedChunk> chunks) {
-        String json = extractJsonArray(response);
-        if (!StringUtils.hasText(json)) {
-            return new ArrayList<>();
-        }
-        try {
-            List<GeneratedQuestionItem> items = objectMapper.readValue(
-                    json,
-                    new TypeReference<List<GeneratedQuestionItem>>() {}
-            );
-            List<Question> questions = new ArrayList<>();
-            for (GeneratedQuestionItem item : items) {
-                Question question = toQuestion(courseId, item, chunks);
-                if (question != null) {
-                    questions.add(question);
-                }
+        JsonNode array = extractQuestionArray(response);
+        List<Question> questions = new ArrayList<>();
+        for (JsonNode item : array) {
+            Question question = toQuestion(courseId, item, chunks);
+            if (question != null) {
+                questions.add(question);
             }
-            return questions;
-        } catch (JsonProcessingException e) {
-            throw new BizException(500, "AI question output is not valid JSON. Please retry.");
         }
+        return questions;
     }
 
-    private Question toQuestion(Long courseId, GeneratedQuestionItem item, List<RetrievedChunk> chunks) throws JsonProcessingException {
-        if (item == null || !StringUtils.hasText(item.getStem()) || !StringUtils.hasText(item.getAnswer())) {
+    private Question toQuestion(Long courseId, JsonNode item, List<RetrievedChunk> chunks) {
+        if (item == null || !item.isObject()) {
             return null;
         }
 
-        String type = normalizeType(item.getType());
-        String difficulty = normalizeDifficulty(item.getDifficulty());
-        if (type == null || difficulty == null) {
+        String stem = text(item, "stem", "question", "title");
+        String answer = text(item, "answer", "correctAnswer", "standardAnswer");
+        if (!StringUtils.hasText(stem) || !StringUtils.hasText(answer)) {
+            return null;
+        }
+
+        String type = normalizeType(text(item, "type", "questionType"));
+        String difficulty = normalizeDifficulty(text(item, "difficulty", "level"));
+        List<String> options = normalizeOptions(item.get("options"), type);
+        String normalizedAnswer = normalizeAnswer(answer, type, options);
+
+        if (isChoiceType(type) && options.size() < 2) {
+            return null;
+        }
+        if (!StringUtils.hasText(normalizedAnswer)) {
             return null;
         }
 
         Question question = new Question();
         question.setCourseId(courseId);
-        question.setSourceChunkId(resolveSourceChunkId(item.getSourceChunkId(), chunks));
+        question.setSourceChunkId(resolveSourceChunkId(longValue(item, "sourceChunkId", "chunkId"), chunks));
         question.setType(type);
-        question.setStem(item.getStem().trim());
-        question.setOptions(item.getOptions() == null ? null : objectMapper.writeValueAsString(item.getOptions()));
-        question.setAnswer(item.getAnswer().trim());
-        question.setExplanation(StringUtils.hasText(item.getExplanation()) ? item.getExplanation().trim() : "Generated from course material.");
+        question.setStem(stem.trim());
+        question.setOptions(options.isEmpty() ? null : writeJson(options));
+        question.setAnswer(normalizedAnswer);
+        question.setExplanation(defaultText(text(item, "explanation", "analysis"), "Generated from course material."));
         question.setDifficulty(difficulty);
-        question.setKnowledgePoint(StringUtils.hasText(item.getKnowledgePoint()) ? item.getKnowledgePoint().trim() : "Course material");
+        question.setKnowledgePoint(defaultText(text(item, "knowledgePoint", "knowledge_point", "topic"), "Course material"));
         return question;
+    }
+
+    private JsonNode extractQuestionArray(String response) {
+        if (!StringUtils.hasText(response)) {
+            throw new BizException(500, "AI question output is empty.");
+        }
+
+        List<String> candidates = jsonCandidates(response);
+        JsonProcessingException lastError = null;
+        for (String candidate : candidates) {
+            if (!StringUtils.hasText(candidate)) {
+                continue;
+            }
+            try {
+                JsonNode node = objectMapper.readTree(candidate);
+                JsonNode array = resolveArrayNode(node);
+                if (array != null && array.isArray()) {
+                    return array;
+                }
+            } catch (JsonProcessingException e) {
+                lastError = e;
+            }
+        }
+
+        String reason = lastError == null ? "No JSON array found." : lastError.getOriginalMessage();
+        throw new BizException(500, "AI question output is not valid JSON: " + reason
+                + ". Output preview: " + abbreviate(response, 500));
+    }
+
+    private List<String> jsonCandidates(String response) {
+        String trimmed = response.trim();
+        List<String> candidates = new ArrayList<>();
+        candidates.add(trimmed);
+
+        int firstFence = trimmed.indexOf("```");
+        int lastFence = trimmed.lastIndexOf("```");
+        if (firstFence >= 0 && lastFence > firstFence) {
+            String fenced = trimmed.substring(firstFence + 3, lastFence).trim();
+            if (fenced.regionMatches(true, 0, "json", 0, 4)) {
+                fenced = fenced.substring(4).trim();
+            }
+            candidates.add(fenced);
+        }
+
+        int arrayStart = trimmed.indexOf('[');
+        int arrayEnd = trimmed.lastIndexOf(']');
+        if (arrayStart >= 0 && arrayEnd > arrayStart) {
+            candidates.add(trimmed.substring(arrayStart, arrayEnd + 1));
+        }
+
+        int objectStart = trimmed.indexOf('{');
+        int objectEnd = trimmed.lastIndexOf('}');
+        if (objectStart >= 0 && objectEnd > objectStart) {
+            candidates.add(trimmed.substring(objectStart, objectEnd + 1));
+        }
+
+        return candidates;
+    }
+
+    private JsonNode resolveArrayNode(JsonNode node) {
+        if (node == null) {
+            return null;
+        }
+        if (node.isArray()) {
+            return node;
+        }
+        JsonNode questions = node.path("questions");
+        if (questions.isArray()) {
+            return questions;
+        }
+        JsonNode data = node.path("data");
+        if (data.isArray()) {
+            return data;
+        }
+        JsonNode items = node.path("items");
+        return items.isArray() ? items : null;
     }
 
     private String normalizeType(String value) {
         if (!StringUtils.hasText(value)) {
             return Question.TYPE_SINGLE_CHOICE;
         }
-        String type = value.trim();
-        return ALLOWED_TYPES.contains(type) ? type : null;
+        String text = value.trim().toLowerCase()
+                .replace('-', '_')
+                .replace(' ', '_');
+        return switch (text) {
+            case "single_choice", "single", "choice", "radio", "单选", "单选题", "选择题" -> Question.TYPE_SINGLE_CHOICE;
+            case "multi_choice", "multiple_choice", "multiple", "multi", "多选", "多选题" -> Question.TYPE_MULTI_CHOICE;
+            case "true_false", "truefalse", "true/false", "判断", "判断题" -> Question.TYPE_TRUE_FALSE;
+            case "short_answer", "short", "qa", "简答", "简答题", "问答题" -> Question.TYPE_SHORT_ANSWER;
+            default -> Question.TYPE_SINGLE_CHOICE;
+        };
     }
 
     private String normalizeDifficulty(String value) {
         if (!StringUtils.hasText(value)) {
             return Question.DIFF_MEDIUM;
         }
-        String difficulty = value.trim();
-        return ALLOWED_DIFFICULTIES.contains(difficulty) ? difficulty : null;
+        String text = value.trim().toLowerCase();
+        return switch (text) {
+            case "easy", "simple", "low", "简单", "容易", "基础" -> Question.DIFF_EASY;
+            case "hard", "difficult", "high", "困难", "较难", "难" -> Question.DIFF_HARD;
+            default -> Question.DIFF_MEDIUM;
+        };
+    }
+
+    private List<String> normalizeOptions(JsonNode optionsNode, String type) {
+        if (Question.TYPE_SHORT_ANSWER.equals(type)) {
+            return List.of();
+        }
+        if (Question.TYPE_TRUE_FALSE.equals(type) && (optionsNode == null || optionsNode.isNull())) {
+            return List.of("正确", "错误");
+        }
+
+        List<String> options = new ArrayList<>();
+        if (optionsNode == null || optionsNode.isNull()) {
+            return options;
+        }
+        if (optionsNode.isArray()) {
+            for (JsonNode option : optionsNode) {
+                String value = option.asText("");
+                if (StringUtils.hasText(value)) {
+                    options.add(value.trim());
+                }
+            }
+            return options;
+        }
+        if (optionsNode.isTextual()) {
+            String raw = optionsNode.asText();
+            try {
+                JsonNode parsed = objectMapper.readTree(raw);
+                if (parsed.isArray()) {
+                    return normalizeOptions(parsed, type);
+                }
+            } catch (JsonProcessingException ignored) {
+                // Fall back to delimiter splitting below.
+            }
+            for (String value : raw.split("\\n|;|；")) {
+                if (StringUtils.hasText(value)) {
+                    options.add(value.trim());
+                }
+            }
+        }
+        return options;
+    }
+
+    private String normalizeAnswer(String answer, String type, List<String> options) {
+        String text = answer == null ? "" : answer.trim();
+        if (!StringUtils.hasText(text)) {
+            return "";
+        }
+        if (isChoiceType(type)) {
+            String letters = choiceLetters(text);
+            if (StringUtils.hasText(letters)) {
+                return Question.TYPE_SINGLE_CHOICE.equals(type) ? letters.substring(0, 1) : letters;
+            }
+            for (String option : options) {
+                String optionText = option.trim();
+                if (optionText.equalsIgnoreCase(text) || optionText.toLowerCase().contains(text.toLowerCase())) {
+                    String optionLetter = choiceLetters(optionText);
+                    if (StringUtils.hasText(optionLetter)) {
+                        return optionLetter.substring(0, 1);
+                    }
+                }
+            }
+        }
+        if (Question.TYPE_TRUE_FALSE.equals(type)) {
+            String lower = text.toLowerCase();
+            if (Set.of("true", "t", "yes", "y", "正确", "对", "是").contains(lower)) {
+                return "正确";
+            }
+            if (Set.of("false", "f", "no", "n", "错误", "错", "否").contains(lower)) {
+                return "错误";
+            }
+        }
+        return text;
+    }
+
+    private String choiceLetters(String value) {
+        Set<Character> letters = new LinkedHashSet<>();
+        for (char ch : value.toUpperCase().toCharArray()) {
+            if (ch >= 'A' && ch <= 'D') {
+                letters.add(ch);
+            }
+        }
+        return letters.stream()
+                .sorted(Comparator.naturalOrder())
+                .collect(StringBuilder::new, StringBuilder::append, StringBuilder::append)
+                .toString();
+    }
+
+    private boolean isChoiceType(String type) {
+        return Question.TYPE_SINGLE_CHOICE.equals(type) || Question.TYPE_MULTI_CHOICE.equals(type);
     }
 
     private Long resolveSourceChunkId(Long sourceChunkId, List<RetrievedChunk> chunks) {
         if (sourceChunkId != null) {
-            return sourceChunkId;
+            for (RetrievedChunk chunk : chunks) {
+                if (sourceChunkId.equals(chunk.chunkId())) {
+                    return sourceChunkId;
+                }
+            }
         }
         return chunks.isEmpty() ? null : chunks.get(0).chunkId();
     }
 
-    private String extractJsonArray(String response) {
-        if (!StringUtils.hasText(response)) {
-            return null;
+    private String text(JsonNode node, String... fieldNames) {
+        for (String fieldName : fieldNames) {
+            JsonNode value = node.get(fieldName);
+            if (value != null && !value.isNull()) {
+                String text = value.asText("");
+                if (StringUtils.hasText(text)) {
+                    return text;
+                }
+            }
         }
-        String trimmed = response.trim();
-        int start = trimmed.indexOf('[');
-        int end = trimmed.lastIndexOf(']');
-        if (start < 0 || end <= start) {
-            return null;
+        return "";
+    }
+
+    private Long longValue(JsonNode node, String... fieldNames) {
+        for (String fieldName : fieldNames) {
+            JsonNode value = node.get(fieldName);
+            if (value == null || value.isNull()) {
+                continue;
+            }
+            if (value.canConvertToLong()) {
+                return value.asLong();
+            }
+            if (value.isTextual()) {
+                try {
+                    return Long.parseLong(value.asText().trim());
+                } catch (NumberFormatException ignored) {
+                    return null;
+                }
+            }
         }
-        return trimmed.substring(start, end + 1);
+        return null;
+    }
+
+    private String defaultText(String value, String fallback) {
+        return StringUtils.hasText(value) ? value.trim() : fallback;
+    }
+
+    private String writeJson(List<String> options) {
+        try {
+            return objectMapper.writeValueAsString(options);
+        } catch (JsonProcessingException e) {
+            throw new BizException(500, "Failed to serialize question options.");
+        }
+    }
+
+    private String abbreviate(String value, int maxLength) {
+        if (value == null) {
+            return "";
+        }
+        return value.length() <= maxLength ? value : value.substring(0, maxLength) + "...";
     }
 
     private Question fallbackQuestion(Long courseId, List<RetrievedChunk> chunks) {
@@ -162,12 +382,12 @@ public class DefaultQuestionGenerationService implements QuestionGenerationServi
         question.setCourseId(courseId);
         question.setSourceChunkId(source == null ? null : source.chunkId());
         question.setType(Question.TYPE_SINGLE_CHOICE);
-        question.setStem("According to the retrieved course material, which statement is correct?");
-        question.setOptions("[\"A. The answer should be grounded in course material\",\"B. The answer should ignore course material\",\"C. The answer should be random\",\"D. The answer should be unrelated\"]");
+        question.setStem("根据课程资料，下列哪一项说法是正确的？");
+        question.setOptions("[\"A. 答案应基于课程资料\",\"B. 答案应忽略课程资料\",\"C. 答案应随机猜测\",\"D. 答案应与课程无关\"]");
         question.setAnswer("A");
-        question.setExplanation(source == null ? "No course material was retrieved." : "Based on chunk: " + source.content());
+        question.setExplanation(source == null ? "未检索到课程资料。" : "依据检索到的课程片段生成。");
         question.setDifficulty(Question.DIFF_MEDIUM);
-        question.setKnowledgePoint("Course material");
+        question.setKnowledgePoint("课程资料");
         return question;
     }
 }

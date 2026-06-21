@@ -7,6 +7,8 @@ import com.rag.backend.question.model.Question;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 
 @Service
 public class PracticeServiceImpl implements PracticeService {
@@ -25,22 +27,19 @@ public class PracticeServiceImpl implements PracticeService {
 
     @Override
     public PracticeRecord submit(Long courseId, Long questionId, String userAnswer) {
-        // 校验课程存在
         if (courseMapper.selectById(courseId) == null) {
-            throw new IllegalArgumentException("课程不存在: " + courseId);
+            throw new IllegalArgumentException("Course does not exist: " + courseId);
         }
 
-        // 校验题目存在
         Question question = questionMapper.selectById(questionId);
         if (question == null) {
-            throw new IllegalArgumentException("题目不存在: " + questionId);
+            throw new IllegalArgumentException("Question does not exist: " + questionId);
         }
 
-        // 判断答案是否正确
-        boolean isCorrect = question.getAnswer() != null
-                && question.getAnswer().trim().equalsIgnoreCase(userAnswer != null ? userAnswer.trim() : "");
+        String standardAnswer = normalizeAnswer(question.getType(), question.getAnswer());
+        String submittedAnswer = normalizeAnswer(question.getType(), userAnswer);
+        boolean isCorrect = !standardAnswer.isBlank() && standardAnswer.equalsIgnoreCase(submittedAnswer);
 
-        // 保存记录
         PracticeRecord record = new PracticeRecord();
         record.setCourseId(courseId);
         record.setQuestionId(questionId);
@@ -59,5 +58,48 @@ public class PracticeServiceImpl implements PracticeService {
     @Override
     public List<PracticeRecord> listWrongQuestions(Long courseId) {
         return practiceMapper.selectWrongByCourseId(courseId);
+    }
+
+    private String normalizeAnswer(String type, String answer) {
+        if (answer == null) {
+            return "";
+        }
+        String text = answer.trim();
+        if (text.isBlank()) {
+            return "";
+        }
+
+        if (Question.TYPE_SINGLE_CHOICE.equals(type)) {
+            String letters = choiceLetters(text);
+            return letters.isBlank() ? text.toUpperCase() : letters.substring(0, 1);
+        }
+        if (Question.TYPE_MULTI_CHOICE.equals(type)) {
+            String letters = choiceLetters(text);
+            return letters.isBlank() ? text.toUpperCase().replaceAll("\\s+", "") : letters;
+        }
+        if (Question.TYPE_TRUE_FALSE.equals(type)) {
+            String lower = text.toLowerCase();
+            if (Set.of("true", "t", "yes", "y", "正确", "对", "是").contains(lower)) {
+                return "正确";
+            }
+            if (Set.of("false", "f", "no", "n", "错误", "错", "否").contains(lower)) {
+                return "错误";
+            }
+        }
+        return text.replaceAll("\\s+", " ").trim();
+    }
+
+    private String choiceLetters(String value) {
+        TreeSet<Character> letters = new TreeSet<>();
+        for (char ch : value.toUpperCase().toCharArray()) {
+            if (ch >= 'A' && ch <= 'D') {
+                letters.add(ch);
+            }
+        }
+        StringBuilder builder = new StringBuilder();
+        for (Character letter : letters) {
+            builder.append(letter);
+        }
+        return builder.toString();
     }
 }

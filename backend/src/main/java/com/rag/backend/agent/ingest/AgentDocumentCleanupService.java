@@ -19,4 +19,9 @@ public class AgentDocumentCleanupService {
         vectorStoreService.deleteByDocumentId(documentId);
         chunkRepository.deleteByDocumentId(documentId);
     }
+
+    public void cleanupCourse(Long courseId) {
+        vectorStoreService.deleteByCourseId(courseId);
+        chunkRepository.deleteByCourseId(courseId);
+    }
 }

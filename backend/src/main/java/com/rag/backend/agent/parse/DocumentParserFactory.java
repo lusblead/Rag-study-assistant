@@ -13,10 +13,10 @@ public class DocumentParserFactory {
         this.parsers = parsers;
     }
 
-    public DocumentParser getParser(String fileType){
+    public DocumentParser getParser(String fileType) {
         return parsers.stream()
-                .filter(parser ->parser.supports(fileType))
+                .filter(parser -> parser.supports(fileType))
                 .findFirst()
-                .orElseThrow(() -> new BizException(400, "不支持的文件类型：" + fileType));
+                .orElseThrow(() -> new BizException(400, "Unsupported file type: " + fileType));
     }
 }
