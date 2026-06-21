@@ -57,6 +57,17 @@ public class MilvusKnowledgeRetriever implements KnowledgeRetriever {
                     );
                 })
                 .toList();
+        if (candidates.isEmpty()) {
+            candidates = chunkRepository.findByCourseId(courseId, searchK).stream()
+                    .map(chunk -> new RetrievedChunk(
+                            chunk.getId(),
+                            chunk.getDocumentId(),
+                            chunk.getTitle(),
+                            chunk.getContent(),
+                            0.0
+                    ))
+                    .toList();
+        }
         return reranker.rerank(query, candidates, topK);
     }
 }

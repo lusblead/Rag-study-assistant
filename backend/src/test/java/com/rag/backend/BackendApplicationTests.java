@@ -113,6 +113,15 @@ class BackendApplicationTests {
         }
 
         @Override
+        public List<KnowledgeChunk> findByCourseId(long courseId, int limit) {
+            return chunks.values().stream()
+                    .filter(chunk -> courseId == chunk.getCourseId())
+                    .sorted(Comparator.comparing(KnowledgeChunk::getId).reversed())
+                    .limit(limit)
+                    .toList();
+        }
+
+        @Override
         public void deleteByDocumentId(long documentId) {
             chunks.values().removeIf(chunk -> documentId == chunk.getDocumentId());
         }

@@ -3,5 +3,5 @@ setlocal EnableExtensions
 
 cd /d "%~dp0"
 
-docker compose ps
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\portable-status.ps1"
 pause

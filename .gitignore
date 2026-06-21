@@ -14,6 +14,10 @@ dist/
 
 uploads/
 release/
+app/
+.runtime/
+data/
+logs/
 
 .DS_Store
 Thumbs.db

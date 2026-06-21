@@ -19,7 +19,7 @@ import io.milvus.v2.service.vector.response.SearchResp;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -27,7 +27,7 @@ import java.util.Collections;
 import java.util.List;
 
 @Service
-@ConditionalOnProperty(name = "agent.mock", havingValue = "false")
+@ConditionalOnExpression("'${agent.mock:false}' == 'false' && '${vector.provider:milvus}' == 'milvus'")
 public class MilvusVectorStoreService implements VectorStoreService {
     private static final Logger log = LoggerFactory.getLogger(MilvusVectorStoreService.class);
 
