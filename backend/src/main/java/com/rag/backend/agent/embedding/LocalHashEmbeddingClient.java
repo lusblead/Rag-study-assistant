@@ -1,8 +1,6 @@
 package com.rag.backend.agent.embedding;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -11,8 +9,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
-@Component
-@ConditionalOnProperty(name = "agent.mock", havingValue = "false")
 public class LocalHashEmbeddingClient implements EmbeddingClient {
     private final int dimension;
 

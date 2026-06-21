@@ -131,6 +131,15 @@ public class MilvusVectorStoreService implements VectorStoreService {
         client.delete(req);
     }
 
+    @Override
+    public void deleteByCourseId(Long courseId) {
+        DeleteReq req = DeleteReq.builder()
+                .collectionName(collectionName)
+                .filter("course_id == " + courseId)
+                .build();
+        client.delete(req);
+    }
+
     private List<Float> toFloatList(List<Double> embedding) {
         List<Float> floats = new ArrayList<>(embedding.size());
         for (Double value : embedding) {

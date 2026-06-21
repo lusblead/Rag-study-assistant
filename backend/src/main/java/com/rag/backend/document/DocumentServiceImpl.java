@@ -16,9 +16,11 @@ import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Set;
 
 @Service
 public class DocumentServiceImpl implements DocumentService {
+    private static final Set<String> SUPPORTED_FILE_TYPES = Set.of("txt", "md", "markdown", "doc", "docx", "pdf", "pptx");
 
     private final DocumentMapper documentMapper;
     private final CourseMapper courseMapper;
@@ -53,6 +55,10 @@ public class DocumentServiceImpl implements DocumentService {
 
         String originalFilename = file.getOriginalFilename();
         String fileType = getFileType(originalFilename);
+        if (!SUPPORTED_FILE_TYPES.contains(fileType)) {
+            throw new BizException(400, "Unsupported file type: " + fileType
+                    + ". Supported types: TXT, Markdown, DOC, DOCX, PPTX, PDF.");
+        }
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
         String storedFilename = timestamp + "_" + sanitizeFilename(originalFilename);
         String relativePath = "documents/" + courseId + "/" + storedFilename;

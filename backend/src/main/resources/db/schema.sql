@@ -68,3 +68,38 @@ CREATE TABLE IF NOT EXISTS practice_records (
     INDEX idx_practice_course (course_id),
     INDEX idx_practice_question (question_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='练习记录表';
+
+-- Chat sessions table
+CREATE TABLE IF NOT EXISTS chat_sessions (
+    id         BIGINT AUTO_INCREMENT PRIMARY KEY,
+    course_id  BIGINT       NOT NULL COMMENT '关联课程ID',
+    title      VARCHAR(100) COMMENT '会话标题',
+    created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    INDEX idx_chat_sessions_course (course_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='多轮会话表';
+
+-- Runtime model settings used by the frontend settings page.
+CREATE TABLE IF NOT EXISTS agent_model_settings (
+    id                 BIGINT PRIMARY KEY,
+    llm_provider       VARCHAR(80)  NOT NULL,
+    llm_base_url       VARCHAR(500) NOT NULL,
+    llm_model          VARCHAR(200) NOT NULL,
+    llm_api_key        TEXT,
+    embedding_provider VARCHAR(80)  NOT NULL,
+    embedding_base_url VARCHAR(500) NOT NULL,
+    embedding_model    VARCHAR(200) NOT NULL,
+    embedding_api_key  TEXT,
+    created_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Agent runtime model settings';
+
+-- Chat messages table
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id         BIGINT AUTO_INCREMENT PRIMARY KEY,
+    session_id BIGINT      NOT NULL COMMENT '会话ID',
+    role       VARCHAR(20) NOT NULL COMMENT 'user/assistant',
+    content    TEXT        NOT NULL COMMENT '消息内容',
+    created_at DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    INDEX idx_chat_messages_session (session_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='多轮会话消息表';

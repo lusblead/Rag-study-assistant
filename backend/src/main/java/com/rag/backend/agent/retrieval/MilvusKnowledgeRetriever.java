@@ -3,9 +3,11 @@ package com.rag.backend.agent.retrieval;
 import com.rag.backend.agent.embedding.EmbeddingClient;
 import com.rag.backend.agent.model.KnowledgeChunk;
 import com.rag.backend.agent.model.VectorSearchResult;
+import com.rag.backend.agent.rerank.KnowledgeReranker;
 import com.rag.backend.agent.repository.KnowledgeChunkRepository;
 import com.rag.backend.agent.vector.VectorStoreService;
 import com.rag.backend.common.BizException;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -15,19 +17,32 @@ public class MilvusKnowledgeRetriever implements KnowledgeRetriever {
     private final EmbeddingClient embeddingClient;
     private final VectorStoreService vectorStoreService;
     private final KnowledgeChunkRepository chunkRepository;
+    private final KnowledgeReranker reranker;
+    private final double similarityThreshold;
+    private final int candidateK;
 
-    public MilvusKnowledgeRetriever(EmbeddingClient embeddingClient, VectorStoreService vectorStoreService, KnowledgeChunkRepository chunkRepository) {
+    public MilvusKnowledgeRetriever(EmbeddingClient embeddingClient,
+                                    VectorStoreService vectorStoreService,
+                                    KnowledgeChunkRepository chunkRepository,
+                                    KnowledgeReranker reranker,
+                                    @Value("${rag.similarity-threshold:0.0}") double similarityThreshold,
+                                    @Value("${rag.candidate-k:20}") int candidateK) {
         this.embeddingClient = embeddingClient;
         this.vectorStoreService = vectorStoreService;
         this.chunkRepository = chunkRepository;
+        this.reranker = reranker;
+        this.similarityThreshold = similarityThreshold;
+        this.candidateK = candidateK;
     }
 
     @Override
     public List<RetrievedChunk> retrieve(Long courseId,String query,int topK){
         List<Double> queryVector = embeddingClient.embed(query);
-        List<VectorSearchResult> results = vectorStoreService.search(courseId, queryVector, topK);
+        int searchK = Math.max(topK, candidateK);
+        List<VectorSearchResult> results = vectorStoreService.search(courseId, queryVector, searchK);
 
-        return results.stream()
+        List<RetrievedChunk> candidates = results.stream()
+                .filter(result -> result.score() == null || result.score() >= similarityThreshold)
                 .map(result ->{
                     KnowledgeChunk chunk = chunkRepository.findById(result.chunkId());
                     if(chunk==null){
@@ -42,5 +57,6 @@ public class MilvusKnowledgeRetriever implements KnowledgeRetriever {
                     );
                 })
                 .toList();
+        return reranker.rerank(query, candidates, topK);
     }
 }

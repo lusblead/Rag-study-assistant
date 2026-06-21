@@ -2,8 +2,9 @@ FROM maven:3.9.9-eclipse-temurin-21 AS build
 WORKDIR /workspace
 COPY pom.xml ./pom.xml
 COPY backend/pom.xml ./backend/pom.xml
+RUN --mount=type=cache,target=/root/.m2 mvn -q -pl backend -am -DskipTests dependency:go-offline
 COPY backend/src ./backend/src
-RUN mvn -q -pl backend -am -DskipTests package
+RUN --mount=type=cache,target=/root/.m2 mvn -q -pl backend -am -DskipTests package
 
 FROM eclipse-temurin:21-jre
 WORKDIR /app

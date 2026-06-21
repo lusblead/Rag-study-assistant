@@ -48,6 +48,17 @@ public class MockVectorStoreService implements VectorStoreService {
         toDelete.forEach(vectors::remove);
     }
 
+    @Override
+    public void deleteByCourseId(Long courseId) {
+        List<Long> toDelete = new ArrayList<>();
+        for (StoredVector vector : vectors.values()) {
+            if (vector.courseId().equals(courseId)) {
+                toDelete.add(vector.chunkId());
+            }
+        }
+        toDelete.forEach(vectors::remove);
+    }
+
     private double cosine(List<Double> a, List<Double> b) {
         int size = Math.min(a.size(), b.size());
         double dot = 0;

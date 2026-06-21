@@ -20,6 +20,9 @@ public interface KnowledgeChunkMapper {
     @Delete("DELETE FROM knowledge_chunks WHERE document_id = #{documentId}")
     int deleteByDocumentId(long documentId);
 
+    @Delete("DELETE FROM knowledge_chunks WHERE course_id = #{courseId}")
+    int deleteByCourseId(long courseId);
+
     @Update("""
             UPDATE knowledge_chunks
             SET milvus_vector_id = #{milvusVectorId}, embedding_status = #{embeddingStatus}

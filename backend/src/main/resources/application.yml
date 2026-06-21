@@ -30,11 +30,27 @@ app:
 milvus:
   host: ${MILVUS_HOST:localhost}
   port: ${MILVUS_PORT:19530}
-  collection-name: ${MILVUS_COLLECTION:knowledge_chunk_vectors}
-  embedding-dimension: ${EMBEDDING_DIMENSION:1536}
+  collection-name: ${MILVUS_COLLECTION:knowledge_chunk_vectors_bge_m3}
+  embedding-dimension: ${EMBEDDING_DIMENSION:1024}
 
 rag:
   top-k: ${RAG_TOP_K:5}
+  candidate-k: ${RAG_CANDIDATE_K:20}
+  similarity-threshold: ${RAG_SIMILARITY_THRESHOLD:0.2}
+  history-limit: ${RAG_HISTORY_LIMIT:8}
+
+rerank:
+  provider: ${RERANK_PROVIDER:local}
+  base-url: ${RERANK_BASE_URL:https://api.siliconflow.cn/v1}
+  api-key: ${RERANK_API_KEY:${SILICONFLOW_API_KEY:}}
+  model: ${RERANK_MODEL:BAAI/bge-reranker-v2-m3}
+  timeout-seconds: ${RERANK_TIMEOUT_SECONDS:60}
+  fail-open: ${RERANK_FAIL_OPEN:true}
+  max-chunks-per-doc: ${RERANK_MAX_CHUNKS_PER_DOC:1024}
+  overlap-tokens: ${RERANK_OVERLAP_TOKENS:50}
+  local:
+    vector-weight: ${RERANK_LOCAL_VECTOR_WEIGHT:0.7}
+    lexical-weight: ${RERANK_LOCAL_LEXICAL_WEIGHT:0.3}
 
 agent:
   # false = use MilvusVectorStoreService + LocalHashEmbeddingClient + LocalChatClient by default.
@@ -42,11 +58,19 @@ agent:
   mock: ${AGENT_MOCK:false}
 
 llm:
-  provider: ${LLM_PROVIDER:local}
-  api-key: ${LLM_API_KEY:}
-  model: ${LLM_MODEL:local-rag-chat}
+  provider: ${LLM_PROVIDER:deepseek}
+  base-url: ${LLM_BASE_URL:https://api.deepseek.com}
+  api-key: ${LLM_API_KEY:${DEEPSEEK_API_KEY:}}
+  model: ${LLM_MODEL:deepseek-v4-pro}
+  system-prompt: ${LLM_SYSTEM_PROMPT:You are a helpful study assistant. Answer strictly based on the retrieved course material when possible.}
+  temperature: ${LLM_TEMPERATURE:0.2}
+  timeout-seconds: ${LLM_TIMEOUT_SECONDS:120}
+  thinking: ${LLM_THINKING:false}
+  reasoning-effort: ${LLM_REASONING_EFFORT:}
 
 embedding:
-  provider: ${EMBEDDING_PROVIDER:local}
-  api-key: ${EMBEDDING_API_KEY:}
-  model: ${EMBEDDING_MODEL:local-hash-embedding}
+  provider: ${EMBEDDING_PROVIDER:openai-compatible}
+  base-url: ${EMBEDDING_BASE_URL:https://api.siliconflow.com/v1}
+  api-key: ${EMBEDDING_API_KEY:${SILICONFLOW_API_KEY:}}
+  model: ${EMBEDDING_MODEL:BAAI/bge-m3}
+  timeout-seconds: ${EMBEDDING_TIMEOUT_SECONDS:120}

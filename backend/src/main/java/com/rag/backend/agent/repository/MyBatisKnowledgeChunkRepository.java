@@ -31,6 +31,11 @@ public class MyBatisKnowledgeChunkRepository implements KnowledgeChunkRepository
     }
 
     @Override
+    public void deleteByCourseId(long courseId) {
+        mapper.deleteByCourseId(courseId);
+    }
+
+    @Override
     public void updateVectorStatus(Long chunkId, String milvusVectorId, String embeddingStatus) {
         KnowledgeChunk chunk = mapper.selectById(chunkId);
         if (chunk == null) {

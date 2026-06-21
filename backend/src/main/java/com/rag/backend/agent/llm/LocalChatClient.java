@@ -1,11 +1,7 @@
 package com.rag.backend.agent.llm;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
-@Component
-@ConditionalOnProperty(name = "agent.mock", havingValue = "false")
 public class LocalChatClient implements ChatClient {
     @Override
     public String call(String prompt) {

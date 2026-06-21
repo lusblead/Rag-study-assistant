@@ -27,4 +27,7 @@ public interface DocumentMapper {
 
     @Delete("DELETE FROM documents WHERE id = #{id}")
     int deleteById(Long id);
+
+    @Delete("DELETE FROM documents WHERE course_id = #{courseId}")
+    int deleteByCourseId(Long courseId);
 }
