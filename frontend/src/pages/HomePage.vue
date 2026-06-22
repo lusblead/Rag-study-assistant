@@ -11,11 +11,6 @@
           }}
         </p>
       </div>
-      <div class="status-card">
-        <span>API</span>
-        <strong>{{ apiBaseUrl }}</strong>
-        <small>{{ courses.length ? `${courses.length} 门课程可用` : "暂无课程" }}</small>
-      </div>
     </div>
 
     <div class="module-grid two">
@@ -40,10 +35,6 @@
         <strong>模型与接口设置</strong>
         <small>维护前端 API 地址，并保存演示用模型、Key 和 .env 片段。</small>
       </button>
-      <button class="module-card compact" type="button" @click="emit('navigate', 'help')">
-        <strong>演示流程说明</strong>
-        <small>从创建课程、上传文档、入库到问答和出题的最短路径。</small>
-      </button>
     </div>
 
     <Panel v-if="!course" title="创建第一门课程">
@@ -58,7 +49,6 @@ import Panel from "../components/Panel.vue";
 import type { Course, RouteKey } from "../types";
 
 defineProps<{
-  apiBaseUrl: string;
   course: Course | null;
   courses: Course[];
   loadingCourses: boolean;

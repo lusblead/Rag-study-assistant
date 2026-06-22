@@ -73,7 +73,19 @@
             <option value="medium">中等</option>
             <option value="hard">困难</option>
           </select>
-          <button class="ghost" :disabled="!course || busy" type="button" @click="loadPracticeData">刷新</button>
+          <button class="ghost" :disabled="!course || !questions.length" type="button" @click="exportQuestions">
+            导出 PDF
+          </button>
+          <button
+            class="ghost icon-only"
+            :disabled="!course || busy"
+            title="刷新题库"
+            type="button"
+            aria-label="刷新题库"
+            @click="loadPracticeData"
+          >
+            ↻
+          </button>
         </div>
       </div>
 
@@ -189,6 +201,114 @@ async function generate() {
   } finally {
     busy.value = false;
   }
+}
+
+function exportQuestions() {
+  if (!props.course || !questions.value.length) {
+    emit("notify", "error", "当前没有可导出的题目");
+    return;
+  }
+
+  const printable = buildPrintableQuestions();
+  const printWindow = window.open("", "_blank", "width=960,height=720");
+  if (!printWindow) {
+    downloadHtml(printable);
+    emit("notify", "info", "浏览器阻止了打印窗口，已改为下载 HTML 文件，可用浏览器打开后另存为 PDF");
+    return;
+  }
+
+  printWindow.document.open();
+  printWindow.document.write(printable);
+  printWindow.document.close();
+  printWindow.focus();
+  window.setTimeout(() => {
+    printWindow.print();
+  }, 250);
+}
+
+function buildPrintableQuestions() {
+  const title = `${props.course?.name || "课程"} - 题目导出`;
+  const exportedAt = new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(new Date());
+
+  const body = questions.value
+    .map((question, index) => {
+      const options = parseOptions(question.options)
+        .map((option) => `<li>${escapeHtml(option)}</li>`)
+        .join("");
+      return `
+        <article class="question">
+          <div class="meta">
+            <strong>第 ${index + 1} 题</strong>
+            <span>${escapeHtml(typeText(question.type))}</span>
+            <span>${escapeHtml(difficultyText(question.difficulty))}</span>
+            ${question.knowledgePoint ? `<span>${escapeHtml(question.knowledgePoint)}</span>` : ""}
+          </div>
+          <h2>${escapeHtml(question.stem)}</h2>
+          ${options ? `<ol class="options">${options}</ol>` : ""}
+          <p><strong>答案：</strong>${escapeHtml(question.answer)}</p>
+          ${question.explanation ? `<p><strong>解析：</strong>${escapeHtml(question.explanation)}</p>` : ""}
+          ${question.sourceChunkId ? `<p class="source">来源片段：${question.sourceChunkId}</p>` : ""}
+        </article>
+      `;
+    })
+    .join("");
+
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(title)}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { color: #17211d; font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif; line-height: 1.65; margin: 0; padding: 28px; }
+    header { border-bottom: 2px solid #0f766e; margin-bottom: 22px; padding-bottom: 12px; }
+    h1 { font-size: 24px; margin: 0 0 6px; }
+    .summary { color: #64736d; font-size: 13px; }
+    .question { break-inside: avoid; border-bottom: 1px solid #dbe4df; padding: 16px 0; }
+    .question h2 { font-size: 17px; margin: 10px 0; }
+    .meta { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
+    .meta span { background: #eef6f3; border-radius: 999px; color: #0a5f59; font-size: 12px; padding: 2px 8px; }
+    .options { margin: 8px 0 10px 22px; padding: 0; }
+    .source { color: #64736d; font-size: 12px; }
+    @page { margin: 18mm; }
+    @media print { body { padding: 0; } button { display: none; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>${escapeHtml(title)}</h1>
+    <div class="summary">导出时间：${escapeHtml(exportedAt)} · 共 ${questions.value.length} 道题</div>
+  </header>
+  ${body}
+</body>
+</html>`;
+}
+
+function downloadHtml(content: string) {
+  const blob = new Blob([content], { type: "text/html;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${props.course?.name || "questions"}-题目导出.html`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function escapeHtml(value?: string | number | null) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function buildRequirement() {

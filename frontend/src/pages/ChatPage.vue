@@ -1,14 +1,15 @@
 <template>
-  <section class="chat-layout">
+  <section :class="['chat-layout', { 'sidebar-collapsed': !sidebarOpen }]">
     <aside :class="['chat-sidebar', { collapsed: !sidebarOpen }]">
-      <div class="sidebar-head">
-        <strong>历史会话</strong>
-        <button class="ghost" type="button" @click="sidebarOpen = !sidebarOpen">
-          {{ sidebarOpen ? "收起" : "展开" }}
-        </button>
-      </div>
+      <button v-if="!sidebarOpen" class="ghost sidebar-toggle-only" type="button" @click="sidebarOpen = true">
+        展开
+      </button>
 
-      <template v-if="sidebarOpen">
+      <template v-else>
+        <div class="sidebar-head">
+          <strong>历史会话</strong>
+          <button class="ghost" type="button" @click="sidebarOpen = false">收起</button>
+        </div>
         <button class="block" type="button" @click="newSession">新建会话</button>
         <div class="list session-list">
           <div
@@ -41,7 +42,7 @@
         </label>
       </div>
 
-      <div class="message-list">
+      <div ref="messageListRef" class="message-list">
         <EmptyState v-if="!course" title="请选择课程后开始对话" />
         <EmptyState
           v-else-if="!messages.length"
@@ -51,7 +52,12 @@
 
         <article v-for="message in messages" :key="message.id" :class="['message', message.role]">
           <div class="message-meta">{{ message.role === "user" ? "你" : "学习助手" }}</div>
-          <div class="message-body">{{ message.content || "正在生成..." }}</div>
+          <div
+            v-if="message.role === 'assistant'"
+            class="message-body markdown-body"
+            v-html="renderMarkdown(message.content || '正在生成...')"
+          />
+          <div v-else class="message-body">{{ message.content || "正在生成..." }}</div>
           <ReferencesList v-if="message.references?.length" :references="message.references" />
         </article>
       </div>
@@ -62,6 +68,7 @@
           :disabled="!course || busy"
           placeholder="输入课程问题，答案会基于已入库文档生成"
           rows="3"
+          @keydown.enter.exact.prevent="submitQuestion"
         />
         <button :disabled="!course || busy || !question.trim()" type="submit">
           {{ busy ? "生成中" : "发送" }}
@@ -69,20 +76,13 @@
       </form>
     </section>
 
-    <aside class="references-panel">
-      <Panel title="最新引用片段">
-        <ReferencesList v-if="latestReferences.length" :references="latestReferences" />
-        <EmptyState v-else title="暂无引用" />
-      </Panel>
-    </aside>
   </section>
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { nextTick, ref, watch } from "vue";
 import { api, streamChat } from "../api";
 import EmptyState from "../components/EmptyState.vue";
-import Panel from "../components/Panel.vue";
 import ReferencesList from "../components/ReferencesList.vue";
 import type { ChatSession, Course, RetrievedChunk } from "../types";
 
@@ -110,6 +110,7 @@ const streaming = ref(true);
 const busy = ref(false);
 const sidebarOpen = ref(true);
 const latestReferences = ref<RetrievedChunk[]>([]);
+const messageListRef = ref<HTMLElement | null>(null);
 
 watch(
   () => props.course?.id,
@@ -151,6 +152,7 @@ async function openSession(sessionId: number) {
       content: message.content,
       createdAt: message.createdAt
     }));
+    void scrollMessagesToBottom();
   } catch (error) {
     emit("notify", "error", error instanceof Error ? error.message : "消息加载失败");
   }
@@ -183,6 +185,7 @@ async function submitQuestion() {
     { id: `user-${Date.now()}`, role: "user", content: text },
     { id: assistantId, role: "assistant", content: streaming.value ? "" : "正在思考..." }
   ];
+  void scrollMessagesToBottom();
 
   try {
     if (streaming.value) {
@@ -201,6 +204,7 @@ async function submitQuestion() {
           onDelta: (delta) => {
             const target = messages.value.find((message) => message.id === assistantId);
             patchAssistant(assistantId, { content: `${target?.content || ""}${delta}` });
+            void scrollMessagesToBottom();
           },
           onError: (message) => emit("notify", "error", message)
         }
@@ -231,6 +235,129 @@ async function submitQuestion() {
 
 function patchAssistant(id: string, patch: Partial<UiMessage>) {
   messages.value = messages.value.map((message) => (message.id === id ? { ...message, ...patch } : message));
+}
+
+async function scrollMessagesToBottom() {
+  await nextTick();
+  const target = messageListRef.value;
+  if (!target) return;
+  target.scrollTo({
+    top: target.scrollHeight,
+    behavior: "smooth"
+  });
+}
+
+function renderMarkdown(markdown: string) {
+  const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+  const html: string[] = [];
+  let paragraph: string[] = [];
+  let listType: "ul" | "ol" | null = null;
+  let inCodeBlock = false;
+  let codeLines: string[] = [];
+
+  const flushParagraph = () => {
+    if (!paragraph.length) return;
+    html.push(`<p>${renderInline(paragraph.join(" "))}</p>`);
+    paragraph = [];
+  };
+
+  const closeList = () => {
+    if (!listType) return;
+    html.push(`</${listType}>`);
+    listType = null;
+  };
+
+  const flushCodeBlock = () => {
+    html.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
+    codeLines = [];
+  };
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (trimmed.startsWith("```")) {
+      if (inCodeBlock) {
+        flushCodeBlock();
+        inCodeBlock = false;
+      } else {
+        flushParagraph();
+        closeList();
+        inCodeBlock = true;
+        codeLines = [];
+      }
+      continue;
+    }
+
+    if (inCodeBlock) {
+      codeLines.push(line);
+      continue;
+    }
+
+    if (!trimmed) {
+      flushParagraph();
+      closeList();
+      continue;
+    }
+
+    const heading = trimmed.match(/^(#{1,4})\s+(.+)$/);
+    if (heading) {
+      flushParagraph();
+      closeList();
+      const level = Math.min(heading[1].length + 2, 6);
+      html.push(`<h${level}>${renderInline(heading[2])}</h${level}>`);
+      continue;
+    }
+
+    const unordered = trimmed.match(/^[-*]\s+(.+)$/);
+    if (unordered) {
+      flushParagraph();
+      if (listType !== "ul") {
+        closeList();
+        html.push("<ul>");
+        listType = "ul";
+      }
+      html.push(`<li>${renderInline(unordered[1])}</li>`);
+      continue;
+    }
+
+    const ordered = trimmed.match(/^\d+[.)]\s+(.+)$/);
+    if (ordered) {
+      flushParagraph();
+      if (listType !== "ol") {
+        closeList();
+        html.push("<ol>");
+        listType = "ol";
+      }
+      html.push(`<li>${renderInline(ordered[1])}</li>`);
+      continue;
+    }
+
+    closeList();
+    paragraph.push(trimmed);
+  }
+
+  if (inCodeBlock) {
+    flushCodeBlock();
+  }
+  flushParagraph();
+  closeList();
+  return html.join("");
+}
+
+function renderInline(value: string) {
+  return escapeHtml(value)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*([^*]+)\*/g, "<em>$1</em>");
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function formatDate(value?: string) {

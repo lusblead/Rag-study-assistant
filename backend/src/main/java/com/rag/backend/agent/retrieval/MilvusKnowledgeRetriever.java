@@ -6,10 +6,10 @@ import com.rag.backend.agent.model.VectorSearchResult;
 import com.rag.backend.agent.rerank.KnowledgeReranker;
 import com.rag.backend.agent.repository.KnowledgeChunkRepository;
 import com.rag.backend.agent.vector.VectorStoreService;
-import com.rag.backend.common.BizException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @Service
@@ -42,22 +42,23 @@ public class MilvusKnowledgeRetriever implements KnowledgeRetriever {
         int searchK = Math.max(topK, candidateK);
         List<VectorSearchResult> results = vectorStoreService.search(courseId, queryVector, searchK);
 
-        List<RetrievedChunk> candidates = results.stream()
-                .filter(result -> result.score() == null || result.score() >= similarityThreshold)
-                .map(result ->{
-                    KnowledgeChunk chunk = chunkRepository.findById(result.chunkId());
-                    if(chunk==null){
-                        throw new BizException("知识片段不存在，chunkId=" + result.chunkId());
-                    }
-                    return new RetrievedChunk(
-                            chunk.getId(),
-                            chunk.getDocumentId(),
-                            chunk.getTitle(),
-                            chunk.getContent(),
-                            result.score()
-                    );
-                })
-                .toList();
+        List<RetrievedChunk> candidates = new ArrayList<>();
+        for (VectorSearchResult result : results) {
+            if (result.score() != null && result.score() < similarityThreshold) {
+                continue;
+            }
+            KnowledgeChunk chunk = chunkRepository.findById(result.chunkId());
+            if (chunk == null) {
+                continue;
+            }
+            candidates.add(new RetrievedChunk(
+                    chunk.getId(),
+                    chunk.getDocumentId(),
+                    chunk.getTitle(),
+                    chunk.getContent(),
+                    result.score()
+            ));
+        }
         if (candidates.isEmpty()) {
             candidates = chunkRepository.findByCourseId(courseId, searchK).stream()
                     .map(chunk -> new RetrievedChunk(
