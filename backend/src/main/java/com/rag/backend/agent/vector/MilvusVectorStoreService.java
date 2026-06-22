@@ -28,6 +28,7 @@ import java.util.List;
 
 @Service
 @ConditionalOnExpression("'${agent.mock:false}' == 'false' && '${vector.provider:milvus}' == 'milvus'")
+// 使用 Milvus 保存、检索和删除知识片段向量。
 public class MilvusVectorStoreService implements VectorStoreService {
     private static final Logger log = LoggerFactory.getLogger(MilvusVectorStoreService.class);
 

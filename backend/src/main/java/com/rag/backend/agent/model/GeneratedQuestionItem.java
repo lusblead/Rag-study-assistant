@@ -2,6 +2,7 @@ package com.rag.backend.agent.model;
 
 import java.util.List;
 
+// 承载模型生成题目的原始结构化数据。
 public class GeneratedQuestionItem {
     private String type;
     private String stem;

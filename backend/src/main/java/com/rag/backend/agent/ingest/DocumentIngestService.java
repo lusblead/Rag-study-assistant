@@ -16,6 +16,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 @Service
+// 解析文档、切片、生成向量并写入向量库。
 public class DocumentIngestService {
     private final DocumentParserFactory parserFactory;
     private final TextChunker textChunker;

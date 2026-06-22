@@ -1,5 +1,6 @@
 package com.rag.backend.agent.model;
 
+// 承载 AI 出题接口的请求参数。
 public class QuestionGenerateRequest {
     private Long courseId;
     private String requirement;
