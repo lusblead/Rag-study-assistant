@@ -42,7 +42,6 @@
 
       <HomePage
         v-if="route === 'home'"
-        :api-base-url="settings.apiBaseUrl"
         :course="selectedCourse"
         :courses="courses"
         :loading-courses="loadingCourses"
@@ -58,6 +57,7 @@
         @course-created="handleCourseCreated"
         @course-deleted="handleCourseDeleted"
         @course-selected="changeCourse"
+        @course-updated="handleCourseUpdated"
         @notify="notify"
       />
 
@@ -204,6 +204,11 @@ async function handleCourseCreated() {
 async function handleCourseDeleted() {
   await loadCourses();
   notify("success", "课程已删除");
+}
+
+async function handleCourseUpdated() {
+  await loadCourses();
+  notify("success", "课程信息已更新");
 }
 
 async function loadModelSettings() {

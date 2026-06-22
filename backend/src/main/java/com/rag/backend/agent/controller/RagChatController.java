@@ -21,7 +21,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -50,7 +49,14 @@ public class RagChatController {
         validate(request);
 
         SseEmitter emitter = new SseEmitter(0L);
-        RagChatStreamResponse response = ragChatService.stream(request.getCourseId(), request.getSessionId(), request.getQuestion());
+        RagChatStreamResponse response;
+        try {
+            response = ragChatService.stream(request.getCourseId(), request.getSessionId(), request.getQuestion());
+        } catch (Exception e) {
+            send(emitter, "error", Map.of("message", String.valueOf(e.getMessage())));
+            emitter.complete();
+            return emitter;
+        }
         send(emitter, "session", Map.of("sessionId", response.sessionId()));
         send(emitter, "references", response.references());
         CompletableFuture.runAsync(() -> response.stream()
@@ -58,7 +64,7 @@ public class RagChatController {
                         chunk -> send(emitter, "delta", chunk),
                         error -> {
                             send(emitter, "error", Map.of("message", String.valueOf(error.getMessage())));
-                            emitter.completeWithError(error);
+                            emitter.complete();
                         },
                         () -> {
                             send(emitter, "done", "[DONE]");
@@ -98,8 +104,8 @@ public class RagChatController {
             synchronized (emitter) {
                 emitter.send(SseEmitter.event().name(eventName).data(data));
             }
-        } catch (IOException e) {
-            emitter.completeWithError(e);
+        } catch (Exception e) {
+            emitter.complete();
         }
     }
 }
