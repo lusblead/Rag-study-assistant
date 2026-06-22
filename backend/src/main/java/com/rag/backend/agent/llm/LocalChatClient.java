@@ -2,6 +2,7 @@ package com.rag.backend.agent.llm;
 
 import reactor.core.publisher.Flux;
 
+// 提供无需外部 API 的本地演示聊天实现。
 public class LocalChatClient implements ChatClient {
     @Override
     public String call(String prompt) {

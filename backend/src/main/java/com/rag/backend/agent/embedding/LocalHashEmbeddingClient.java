@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
+// 用本地哈希算法生成演示用向量。
 public class LocalHashEmbeddingClient implements EmbeddingClient {
     private final int dimension;
 

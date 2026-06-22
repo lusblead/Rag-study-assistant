@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Set;
 
 @Service
+// 基于检索到的课程片段调用模型生成并保存题目。
 public class DefaultQuestionGenerationService implements QuestionGenerationService {
     private final KnowledgeRetriever knowledgeRetriever;
     private final QuestionService questionService;

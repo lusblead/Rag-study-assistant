@@ -12,6 +12,7 @@ import java.nio.file.Path;
 import java.util.Collections;
 
 @Component
+// 解析 docx 文档中的段落和表格文本。
 public class DocxDocumentParser implements DocumentParser {
     @Override
     public boolean supports(String fileType) {

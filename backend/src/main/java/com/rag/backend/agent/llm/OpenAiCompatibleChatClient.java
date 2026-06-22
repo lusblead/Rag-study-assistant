@@ -23,6 +23,7 @@ import java.util.stream.Stream;
 
 @Component
 @ConditionalOnExpression("'${agent.mock:false}' == 'false'")
+// 调用 DeepSeek 或 OpenAI-compatible 聊天补全接口。
 public class OpenAiCompatibleChatClient implements ChatClient {
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;

@@ -25,6 +25,7 @@ import java.util.Locale;
 
 @Component
 @ConditionalOnExpression("'${agent.mock:false}' == 'false'")
+// 调用 OpenAI-compatible Embedding 接口或本地向量实现生成文本向量。
 public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient {
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;

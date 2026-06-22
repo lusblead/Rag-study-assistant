@@ -5,6 +5,7 @@ import org.apache.ibatis.annotations.*;
 import java.util.List;
 
 @Mapper
+// 封装会话和消息表的 MyBatis SQL 操作。
 public interface ChatHistoryMapper {
     @Insert("INSERT INTO chat_sessions (course_id, title) VALUES (#{courseId}, #{title})")
     @Options(useGeneratedKeys = true, keyProperty = "id")

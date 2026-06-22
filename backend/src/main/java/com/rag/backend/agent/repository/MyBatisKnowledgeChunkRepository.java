@@ -9,6 +9,7 @@ import java.util.List;
 
 @Primary
 @Repository
+// 使用 MyBatis 实现知识片段仓储。
 public class MyBatisKnowledgeChunkRepository implements KnowledgeChunkRepository {
     private final KnowledgeChunkMapper mapper;
 

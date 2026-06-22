@@ -5,6 +5,7 @@ import com.rag.backend.agent.vector.VectorStoreService;
 import org.springframework.stereotype.Service;
 
 @Service
+// 清理文档或课程关联的向量和知识片段。
 public class AgentDocumentCleanupService {
     private final VectorStoreService vectorStoreService;
     private final KnowledgeChunkRepository chunkRepository;

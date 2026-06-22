@@ -2,6 +2,7 @@ package com.rag.backend.agent.history;
 
 import java.util.List;
 
+// 定义聊天会话历史的服务接口。
 public interface ChatHistoryService {
     Long resolveSession(Long sessionId, Long courseId, String firstQuestion);
 

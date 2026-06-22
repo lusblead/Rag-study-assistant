@@ -1,5 +1,6 @@
 package com.rag.backend.agent.settings;
 
+// 承载更新模型配置的请求参数。
 public class AgentModelSettingsRequest {
     private String llmProvider;
     private String llmBaseUrl;

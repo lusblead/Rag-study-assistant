@@ -2,6 +2,7 @@ package com.rag.backend.agent.history;
 
 import java.time.LocalDateTime;
 
+// 表示一次课程问答会话。
 public class ChatSession {
     private Long id;
     private Long courseId;

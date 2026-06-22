@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/agent/model-settings")
+// 提供前端读取、更新和测试模型配置的接口。
 public class AgentModelSettingsController {
     private final AgentModelSettingsService settingsService;
 

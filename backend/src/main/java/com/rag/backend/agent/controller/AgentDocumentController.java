@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/agent/documents")
+// 提供文档入库相关的 Agent API。
 public class AgentDocumentController {
     private final AgentDocumentIngestService ingestService;
 

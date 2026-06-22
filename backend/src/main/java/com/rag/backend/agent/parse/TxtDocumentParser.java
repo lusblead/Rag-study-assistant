@@ -11,6 +11,7 @@ import java.nio.file.Path;
 import java.util.Collections;
 
 @Component
+// 解析 txt 纯文本文件内容。
 public class TxtDocumentParser implements DocumentParser {
     @Override
     public boolean supports(String fileType) {

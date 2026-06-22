@@ -2,6 +2,7 @@ package com.rag.backend.agent.settings;
 
 import java.time.LocalDateTime;
 
+// 保存运行时模型和向量服务配置。
 public class AgentModelSettings {
     private Long id;
     private String llmProvider;

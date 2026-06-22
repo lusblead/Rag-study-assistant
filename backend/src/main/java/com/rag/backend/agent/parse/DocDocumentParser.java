@@ -12,6 +12,7 @@ import java.nio.file.Path;
 import java.util.Collections;
 
 @Component
+// 解析旧版 Word doc 文档中的文本。
 public class DocDocumentParser implements DocumentParser {
     @Override
     public boolean supports(String fileType) {

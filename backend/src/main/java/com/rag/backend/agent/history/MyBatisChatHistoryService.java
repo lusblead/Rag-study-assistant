@@ -8,6 +8,7 @@ import org.springframework.util.StringUtils;
 import java.util.List;
 
 @Service
+// 使用 MyBatis 持久化和查询聊天历史。
 public class MyBatisChatHistoryService implements ChatHistoryService {
     private final ChatHistoryMapper mapper;
 

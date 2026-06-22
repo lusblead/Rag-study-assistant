@@ -6,6 +6,7 @@ import org.apache.ibatis.annotations.*;
 import java.util.List;
 
 @Mapper
+// 封装知识片段表的 MyBatis SQL 操作。
 public interface KnowledgeChunkMapper {
     @Insert("""
             INSERT INTO knowledge_chunks

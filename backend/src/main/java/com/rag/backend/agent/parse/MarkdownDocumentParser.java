@@ -11,6 +11,7 @@ import java.nio.file.Path;
 import java.util.Collections;
 
 @Component
+// 解析 Markdown 文档内容。
 public class MarkdownDocumentParser implements DocumentParser {
     @Override
     public boolean supports(String fileType) {

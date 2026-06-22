@@ -6,6 +6,7 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 
 @Component
+// 根据文件类型选择合适的文档解析器。
 public class DocumentParserFactory {
     private final List<DocumentParser> parsers;
 

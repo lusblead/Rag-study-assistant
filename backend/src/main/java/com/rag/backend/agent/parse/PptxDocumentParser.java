@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Component
+// 解析 pptx 演示文稿中的文本。
 public class PptxDocumentParser implements DocumentParser {
     @Override
     public boolean supports(String fileType) {

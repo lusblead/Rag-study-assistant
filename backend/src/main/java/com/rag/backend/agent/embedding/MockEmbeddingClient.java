@@ -9,6 +9,7 @@ import java.util.List;
 @ConditionalOnProperty(name = "agent.mock", havingValue = "true", matchIfMissing = true)
 @Component
 //模拟embedding逻辑
+// 为 mock 模式提供可预测的向量生成实现。
 public class MockEmbeddingClient implements EmbeddingClient {
     @Override
     public List<Double> embed(String text){
