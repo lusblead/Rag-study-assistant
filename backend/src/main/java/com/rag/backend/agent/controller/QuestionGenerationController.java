@@ -15,6 +15,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/agent/questions")
+// 提供 AI 出题并保存题库的接口。
 public class QuestionGenerationController {
     private final QuestionGenerationService generationService;
 

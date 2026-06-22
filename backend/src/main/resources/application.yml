@@ -65,8 +65,8 @@ llm:
   base-url: ${LLM_BASE_URL:https://api.deepseek.com}
   api-key: ${LLM_API_KEY:${DEEPSEEK_API_KEY:}}
   model: ${LLM_MODEL:deepseek-v4-pro}
-  system-prompt: ${LLM_SYSTEM_PROMPT:You are a helpful study assistant. Answer strictly based on the retrieved course material when possible.}
-  temperature: ${LLM_TEMPERATURE:0.2}
+  system-prompt: ${LLM_SYSTEM_PROMPT:You are a knowledgeable study assistant. Provide detailed, thorough explanations. Break down complex concepts, use examples, and structure your answers clearly. Always ground your answers in the provided course material.}
+  temperature: ${LLM_TEMPERATURE:0.6}
   timeout-seconds: ${LLM_TIMEOUT_SECONDS:120}
   thinking: ${LLM_THINKING:false}
   reasoning-effort: ${LLM_REASONING_EFFORT:}

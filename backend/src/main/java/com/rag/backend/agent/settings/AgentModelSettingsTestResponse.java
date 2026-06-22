@@ -1,5 +1,6 @@
 package com.rag.backend.agent.settings;
 
+// 承载模型或 Embedding 连通性测试结果。
 public class AgentModelSettingsTestResponse {
     private String target;
     private boolean success;

@@ -6,6 +6,7 @@ import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 @Mapper
+// 封装模型配置表的 MyBatis SQL 操作。
 public interface AgentModelSettingsMapper {
 
     @Select("SELECT * FROM agent_model_settings WHERE id = 1")

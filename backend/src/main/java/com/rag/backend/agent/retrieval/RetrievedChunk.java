@@ -1,5 +1,6 @@
 package com.rag.backend.agent.retrieval;
 
+// 表示检索后可用于提示词引用的知识片段。
 public record RetrievedChunk(
         Long chunkId,
         Long documentId,

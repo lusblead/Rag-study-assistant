@@ -13,6 +13,7 @@ import java.util.Set;
 
 @Component
 @ConditionalOnExpression("'${rerank.provider:local}' == 'local'")
+// 基于词法命中和向量分数进行本地重排序。
 public class LocalLexicalKnowledgeReranker implements KnowledgeReranker {
     private final double vectorWeight;
     private final double lexicalWeight;

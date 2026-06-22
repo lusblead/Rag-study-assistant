@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Component
+// 解析普通文字版 PDF 文档内容。
 public class PdfDocumentParser implements DocumentParser {
     @Override
     public boolean supports(String fileType) {

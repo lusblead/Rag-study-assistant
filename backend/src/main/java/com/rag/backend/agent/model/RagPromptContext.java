@@ -7,6 +7,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
+// 聚合生成 RAG 提示词所需的上下文。
 public record RagPromptContext(String question, List<RetrievedChunk> chunks, List<ChatMessage> history) {
     public RagPromptContext(String question, List<RetrievedChunk> chunks) {
         this(question, chunks, Collections.emptyList());

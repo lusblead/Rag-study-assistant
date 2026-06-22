@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Component
+// 按固定窗口将清洗后的文本切分为可入库的知识片段。
 public class FixedWindowTextChunker implements TextChunker {
     private final TextCleaner textCleaner;
 

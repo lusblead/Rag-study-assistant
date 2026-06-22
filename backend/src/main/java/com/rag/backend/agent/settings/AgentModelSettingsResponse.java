@@ -1,5 +1,6 @@
 package com.rag.backend.agent.settings;
 
+// 承载返回给前端的模型配置摘要。
 public class AgentModelSettingsResponse {
     private String llmProvider;
     private String llmBaseUrl;

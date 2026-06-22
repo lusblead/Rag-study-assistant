@@ -22,6 +22,7 @@ import java.util.List;
 
 @Component
 @ConditionalOnExpression("'${rerank.provider:local}' == 'siliconflow'")
+// 调用 SiliconFlow rerank 接口对候选片段重排序。
 public class SiliconFlowKnowledgeReranker implements KnowledgeReranker {
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;

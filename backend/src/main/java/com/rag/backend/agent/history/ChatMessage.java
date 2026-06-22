@@ -2,6 +2,7 @@ package com.rag.backend.agent.history;
 
 import java.time.LocalDateTime;
 
+// 表示一条用户或助手聊天消息。
 public class ChatMessage {
     public static final String ROLE_USER = "user";
     public static final String ROLE_ASSISTANT = "assistant";

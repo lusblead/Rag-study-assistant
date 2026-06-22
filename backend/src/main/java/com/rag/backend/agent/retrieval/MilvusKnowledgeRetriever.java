@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 @Service
+// 使用向量库和重排序器检索课程知识片段。
 public class MilvusKnowledgeRetriever implements KnowledgeRetriever {
     private final EmbeddingClient embeddingClient;
     private final VectorStoreService vectorStoreService;

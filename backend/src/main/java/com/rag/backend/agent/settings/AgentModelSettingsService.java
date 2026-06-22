@@ -18,6 +18,7 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 
 @Service
+// 管理运行时模型配置、密钥回退和连通性测试。
 public class AgentModelSettingsService {
     private final AgentModelSettingsMapper mapper;
     private final Environment environment;
