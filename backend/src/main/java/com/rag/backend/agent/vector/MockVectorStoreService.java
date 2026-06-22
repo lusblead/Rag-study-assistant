@@ -13,6 +13,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 @ConditionalOnExpression("'${agent.mock:false}' == 'true' || '${vector.provider:milvus}' == 'local'")
+// 在内存中保存向量以支持本地或 mock 检索。
 public class MockVectorStoreService implements VectorStoreService {
     private final Map<Long, StoredVector> vectors = new ConcurrentHashMap<>();
 

@@ -2,6 +2,7 @@ package com.rag.backend.agent.model;
 
 import java.time.LocalDateTime;
 
+// 表示课程资料切片后的知识片段记录。
 public class KnowledgeChunk {
 
     private Long id;

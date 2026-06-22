@@ -3,6 +3,7 @@ import com.rag.backend.agent.model.KnowledgeChunk;
 
 import java.util.List;
 
+// 定义知识片段持久化仓储接口。
 public interface KnowledgeChunkRepository {
     KnowledgeChunk save(KnowledgeChunk chunk);
 

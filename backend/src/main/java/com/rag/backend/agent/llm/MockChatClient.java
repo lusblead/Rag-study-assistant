@@ -6,6 +6,7 @@ import reactor.core.publisher.Flux;
 
 @Component
 @ConditionalOnProperty(name = "agent.mock", havingValue = "true", matchIfMissing = true)
+// 为 mock 模式提供固定响应的大模型实现。
 public class MockChatClient implements ChatClient {
     @Override
     public String call(String prompt) {

@@ -1,5 +1,6 @@
 package com.rag.backend.agent.model;
 
+// 承载 RAG 问答接口的请求参数。
 public class RagChatRequest {
     private Long courseId;
     private Long sessionId;

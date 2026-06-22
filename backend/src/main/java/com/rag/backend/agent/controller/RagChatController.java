@@ -28,6 +28,7 @@ import java.util.concurrent.CompletableFuture;
 
 @RestController
 @RequestMapping("/api/agent/chat")
+// 提供普通问答、流式问答和会话历史接口。
 public class RagChatController {
     private final RagChatService ragChatService;
     private final ChatHistoryService chatHistoryService;

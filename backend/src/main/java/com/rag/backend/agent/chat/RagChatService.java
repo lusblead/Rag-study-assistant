@@ -16,6 +16,7 @@ import reactor.core.publisher.Flux;
 import java.util.List;
 
 @Service
+// 编排 RAG 问答、检索上下文、调用模型并保存会话历史。
 public class RagChatService {
     private final int topK;
     private final int historyLimit;

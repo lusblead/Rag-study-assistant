@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import java.nio.file.Path;
 
 @Service
+// 协调文档状态更新和 Agent 入库流程。
 public class AgentDocumentIngestService {
     private final DocumentService documentService;
     private final DocumentIngestService documentIngestService;
