@@ -123,7 +123,11 @@
 
           <div v-if="resultByQuestion[item.id]" :class="['result', resultByQuestion[item.id].isCorrect ? 'correct' : 'wrong']">
             <strong>{{ resultByQuestion[item.id].isCorrect ? "正确" : "不正确" }}</strong>
+            <span v-if="resultByQuestion[item.id].gradingMode">
+              判题方式：{{ resultByQuestion[item.id].gradingMode === "ai" ? "AI 语义判题" : "规则判题" }}
+            </span>
             <span>标准答案：{{ item.answer }}</span>
+            <p v-if="resultByQuestion[item.id].gradingFeedback">{{ resultByQuestion[item.id].gradingFeedback }}</p>
             <p v-if="item.explanation">{{ item.explanation }}</p>
           </div>
         </article>

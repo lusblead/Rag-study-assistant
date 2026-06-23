@@ -13,6 +13,8 @@ public class PracticeResultResponse {
     private String userAnswer;
     private String correctAnswer;
     private Boolean isCorrect;
+    private String gradingMode;
+    private String gradingFeedback;
     private LocalDateTime createdAt;
 
     public static PracticeResultResponse from(PracticeRecord record, String correctAnswer) {
@@ -23,6 +25,8 @@ public class PracticeResultResponse {
         r.userAnswer = record.getUserAnswer();
         r.correctAnswer = correctAnswer;
         r.isCorrect = record.getIsCorrect();
+        r.gradingMode = record.getGradingMode();
+        r.gradingFeedback = record.getGradingFeedback();
         r.createdAt = record.getCreatedAt();
         return r;
     }
@@ -44,6 +48,12 @@ public class PracticeResultResponse {
 
     public Boolean getIsCorrect() { return isCorrect; }
     public void setIsCorrect(Boolean isCorrect) { this.isCorrect = isCorrect; }
+
+    public String getGradingMode() { return gradingMode; }
+    public void setGradingMode(String gradingMode) { this.gradingMode = gradingMode; }
+
+    public String getGradingFeedback() { return gradingFeedback; }
+    public void setGradingFeedback(String gradingFeedback) { this.gradingFeedback = gradingFeedback; }
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }

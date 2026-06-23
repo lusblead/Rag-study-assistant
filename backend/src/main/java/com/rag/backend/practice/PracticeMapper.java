@@ -8,8 +8,8 @@ import java.util.List;
 @Mapper
 public interface PracticeMapper {
 
-    @Insert("INSERT INTO practice_records (course_id, question_id, user_answer, is_correct) " +
-            "VALUES (#{courseId}, #{questionId}, #{userAnswer}, #{isCorrect})")
+    @Insert("INSERT INTO practice_records (course_id, question_id, user_answer, is_correct, grading_mode, grading_feedback) " +
+            "VALUES (#{courseId}, #{questionId}, #{userAnswer}, #{isCorrect}, #{gradingMode}, #{gradingFeedback})")
     @Options(useGeneratedKeys = true, keyProperty = "id")
     int insert(PracticeRecord record);
 

@@ -62,8 +62,13 @@ CREATE TABLE IF NOT EXISTS practice_records (
     question_id BIGINT       NOT NULL,
     user_answer VARCHAR(500),
     is_correct  BOOLEAN,
+    grading_mode VARCHAR(40),
+    grading_feedback CLOB,
     created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+ALTER TABLE practice_records ADD COLUMN IF NOT EXISTS grading_mode VARCHAR(40);
+ALTER TABLE practice_records ADD COLUMN IF NOT EXISTS grading_feedback CLOB;
 
 CREATE INDEX IF NOT EXISTS idx_practice_course ON practice_records(course_id);
 CREATE INDEX IF NOT EXISTS idx_practice_question ON practice_records(question_id);

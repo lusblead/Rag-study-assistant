@@ -198,6 +198,14 @@ public class OpenAiCompatibleChatClient implements ChatClient {
     }
 
     private String localCall(String prompt) {
+        if (prompt != null && prompt.contains("SHORT_ANSWER_GRADING_JSON")) {
+            return """
+                    {
+                      "correct": true,
+                      "feedback": "本地模型占位判题：已接入 RAG 判题流程。配置真实 LLM 后会根据课程材料、标准答案和学生答案进行语义判定。"
+                    }
+                    """;
+        }
         if (prompt != null && prompt.contains("JSON") && prompt.contains("type")) {
             return """
                     [

@@ -64,10 +64,15 @@ CREATE TABLE IF NOT EXISTS practice_records (
     question_id BIGINT       NOT NULL COMMENT '关联题目ID',
     user_answer VARCHAR(500) COMMENT '用户答案',
     is_correct  BOOLEAN      COMMENT '是否正确',
+    grading_mode VARCHAR(40) COMMENT 'rule/ai',
+    grading_feedback TEXT COMMENT 'AI grading feedback',
     created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     INDEX idx_practice_course (course_id),
     INDEX idx_practice_question (question_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='练习记录表';
+
+ALTER TABLE practice_records ADD COLUMN IF NOT EXISTS grading_mode VARCHAR(40) COMMENT 'rule/ai';
+ALTER TABLE practice_records ADD COLUMN IF NOT EXISTS grading_feedback TEXT COMMENT 'AI grading feedback';
 
 -- Chat sessions table
 CREATE TABLE IF NOT EXISTS chat_sessions (

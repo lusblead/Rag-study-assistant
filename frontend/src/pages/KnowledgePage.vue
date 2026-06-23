@@ -88,9 +88,13 @@
             </div>
             <StatusBadge :status="document.parseStatus" />
             <div class="row-actions">
+              <button class="ghost" type="button" @click="openPreview(document)">查看</button>
               <button :disabled="busy" type="button" @click="ingest(document.id)">
                 {{ document.parseStatus === "PARSED" ? "重新入库" : "解析入库" }}
               </button>
+              <a class="button-link ghost" :href="api.documentFileUrl(document.id)" target="_blank" rel="noreferrer">
+                下载
+              </a>
               <button class="danger" :disabled="busy" type="button" @click="removeDocument(document.id)">删除</button>
             </div>
           </article>
@@ -141,6 +145,31 @@
       <small class="muted-note">删除课程会同时清理该课程下的文档、知识片段、向量、题目、练习记录和会话历史。</small>
     </section>
   </div>
+
+  <div v-if="previewDocument" class="modal-backdrop" @click.self="closePreview">
+    <section class="modal-panel document-preview-panel" role="dialog" aria-modal="true" aria-labelledby="document-preview-title">
+      <div class="modal-head">
+        <h2 id="document-preview-title">{{ previewDocument.filename }}</h2>
+        <button class="ghost icon-only" type="button" aria-label="关闭" @click="closePreview">×</button>
+      </div>
+      <iframe
+        v-if="canInlinePreview(previewDocument)"
+        class="document-preview-frame"
+        :src="api.documentFileUrl(previewDocument.id)"
+        title="文档预览"
+      />
+      <div v-else class="document-preview-empty">
+        <strong>该类型可能无法在浏览器内直接预览</strong>
+        <span>可以点击下方按钮在新窗口打开或下载原文件。</span>
+      </div>
+      <div class="form-actions">
+        <a class="button-link" :href="api.documentFileUrl(previewDocument.id)" target="_blank" rel="noreferrer">
+          新窗口打开
+        </a>
+        <button class="ghost" type="button" @click="closePreview">关闭</button>
+      </div>
+    </section>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -173,6 +202,7 @@ const loading = ref(false);
 const dragActive = ref(false);
 const showCreateCourseModal = ref(false);
 const showEditCourseModal = ref(false);
+const previewDocument = ref<CourseDocument | null>(null);
 const editCourseId = ref<number | null>(null);
 const editName = ref("");
 const editTerm = ref("");
@@ -259,6 +289,18 @@ function normalizeFiles(fileList?: FileList | null) {
     const extension = item.name.split(".").pop()?.toLowerCase() || "";
     return allowed.has(extension);
   });
+}
+
+function openPreview(document: CourseDocument) {
+  previewDocument.value = document;
+}
+
+function closePreview() {
+  previewDocument.value = null;
+}
+
+function canInlinePreview(document: CourseDocument) {
+  return new Set(["pdf", "txt", "md", "markdown"]).has((document.fileType || "").toLowerCase());
 }
 
 async function loadDocuments() {

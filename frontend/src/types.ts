@@ -80,6 +80,8 @@ export type PracticeRecord = {
   questionId: number;
   userAnswer: string;
   isCorrect?: boolean;
+  gradingMode?: "rule" | "ai" | string;
+  gradingFeedback?: string;
   createdAt?: string;
 };
 
