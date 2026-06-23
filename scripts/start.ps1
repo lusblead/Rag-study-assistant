@@ -16,6 +16,21 @@ function Test-HttpReady([string]$Url) {
     }
 }
 
+function Get-LanIp {
+    try {
+        $ip = Get-NetIPAddress -AddressFamily IPv4 |
+            Where-Object {
+                $_.IPAddress -notlike "127.*" -and
+                $_.IPAddress -notlike "169.254.*" -and
+                $_.IPAddress -notlike "172.17.*"
+            } |
+            Select-Object -First 1 -ExpandProperty IPAddress
+        return $ip
+    } catch {
+        return ""
+    }
+}
+
 function Wait-Services {
     $deadline = (Get-Date).AddMinutes(4)
     $frontendReady = $false
@@ -64,6 +79,11 @@ Write-Host ""
 Write-Host "Application is ready:"
 Write-Host "  Frontend: http://localhost:5173"
 Write-Host "  Backend:  http://localhost:8080"
+$lanIp = Get-LanIp
+if ($lanIp) {
+    Write-Host "  LAN Frontend: http://${lanIp}:5173"
+    Write-Host "  LAN Backend:  http://${lanIp}:8080"
+}
 Write-Host ""
 
 Start-Process "http://localhost:5173"

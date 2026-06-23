@@ -17,8 +17,22 @@ import type {
 
 const SETTINGS_KEY = "rag-study-assistant:settings";
 
+function defaultApiBaseUrl() {
+  const configured = import.meta.env.VITE_API_BASE_URL?.trim();
+  if (configured) {
+    return configured;
+  }
+
+  if (typeof window !== "undefined" && window.location.hostname) {
+    const protocol = window.location.protocol === "https:" ? "https:" : "http:";
+    return `${protocol}//${window.location.hostname}:8080`;
+  }
+
+  return "http://localhost:8080";
+}
+
 const defaultSettings: AppSettings = {
-  apiBaseUrl: import.meta.env.VITE_API_BASE_URL || "http://localhost:8080",
+  apiBaseUrl: defaultApiBaseUrl(),
   llmProvider: "deepseek",
   llmBaseUrl: "https://api.deepseek.com",
   llmModel: "deepseek-v4-pro",
@@ -39,7 +53,11 @@ export function loadSettings(): AppSettings {
     if (!raw) {
       return defaultSettings;
     }
-    return { ...defaultSettings, ...JSON.parse(raw) };
+    const settings = { ...defaultSettings, ...JSON.parse(raw) };
+    if (settings.apiBaseUrl === "http://localhost:8080" && defaultSettings.apiBaseUrl !== "http://localhost:8080") {
+      settings.apiBaseUrl = defaultSettings.apiBaseUrl;
+    }
+    return settings;
   } catch {
     return defaultSettings;
   }
@@ -155,6 +173,7 @@ export const api = {
   deleteCourse: (id: number) => request<void>(`/api/courses/${id}`, { method: "DELETE" }),
 
   listDocuments: (courseId: number) => request<CourseDocument[]>(`/api/documents${query({ courseId })}`),
+  documentFileUrl: (documentId: number) => `${apiBaseUrl()}/api/documents/${documentId}/file`,
   uploadDocument: (courseId: number, file: File) => {
     const form = new FormData();
     form.set("courseId", String(courseId));

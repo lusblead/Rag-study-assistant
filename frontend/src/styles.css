@@ -55,6 +55,35 @@ button:hover:not(:disabled) {
   background: var(--primary-strong);
 }
 
+a.button-link {
+  align-items: center;
+  background: var(--primary);
+  border: 1px solid var(--primary);
+  border-radius: 8px;
+  color: #fff;
+  display: inline-flex;
+  font-weight: 650;
+  gap: 8px;
+  justify-content: center;
+  min-height: 38px;
+  padding: 8px 14px;
+  text-decoration: none;
+}
+
+a.button-link:hover {
+  background: var(--primary-strong);
+}
+
+a.button-link.ghost {
+  background: #fff;
+  border-color: var(--line);
+  color: var(--text);
+}
+
+a.button-link.ghost:hover {
+  background: var(--surface-soft);
+}
+
 button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
@@ -427,6 +456,36 @@ label {
 .modal-head h2 {
   font-size: 20px;
   margin: 0;
+}
+
+.document-preview-panel {
+  max-width: min(1120px, 96vw);
+  width: min(1120px, 96vw);
+}
+
+.document-preview-frame {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  height: min(72vh, 760px);
+  width: 100%;
+}
+
+.document-preview-empty {
+  align-items: center;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  display: grid;
+  gap: 8px;
+  min-height: 260px;
+  padding: 24px;
+  text-align: center;
+}
+
+.document-preview-empty strong {
+  color: var(--text);
 }
 
 .list {

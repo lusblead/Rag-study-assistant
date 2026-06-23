@@ -14,6 +14,10 @@ public class PracticeRecord {
 
     private Boolean isCorrect;
 
+    private String gradingMode;
+
+    private String gradingFeedback;
+
     private LocalDateTime createdAt;
 
     // -- getters / setters ----------------------------------------
@@ -32,6 +36,12 @@ public class PracticeRecord {
 
     public Boolean getIsCorrect() { return isCorrect; }
     public void setIsCorrect(Boolean isCorrect) { this.isCorrect = isCorrect; }
+
+    public String getGradingMode() { return gradingMode; }
+    public void setGradingMode(String gradingMode) { this.gradingMode = gradingMode; }
+
+    public String getGradingFeedback() { return gradingFeedback; }
+    public void setGradingFeedback(String gradingFeedback) { this.gradingFeedback = gradingFeedback; }
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }

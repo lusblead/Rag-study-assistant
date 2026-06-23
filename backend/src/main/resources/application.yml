@@ -77,3 +77,10 @@ embedding:
   api-key: ${EMBEDDING_API_KEY:${SILICONFLOW_API_KEY:}}
   model: ${EMBEDDING_MODEL:BAAI/bge-m3}
   timeout-seconds: ${EMBEDDING_TIMEOUT_SECONDS:120}
+
+ocr:
+  tesseract:
+    command: ${OCR_TESSERACT_COMMAND:tesseract}
+    language: ${OCR_TESSERACT_LANGUAGE:chi_sim+eng}
+    dpi: ${OCR_TESSERACT_DPI:220}
+    timeout-seconds: ${OCR_TESSERACT_TIMEOUT_SECONDS:60}
