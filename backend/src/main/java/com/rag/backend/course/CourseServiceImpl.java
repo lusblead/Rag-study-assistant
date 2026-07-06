@@ -7,7 +7,10 @@ import com.rag.backend.course.model.Course;
 import com.rag.backend.document.DocumentMapper;
 import com.rag.backend.document.model.CourseDocument;
 import com.rag.backend.practice.PracticeMapper;
+import com.rag.backend.paper.PaperMapper;
+import com.rag.backend.paper.PaperQuestionMapper;
 import com.rag.backend.question.QuestionMapper;
+import com.rag.backend.question.QuestionBatchMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -23,22 +26,31 @@ public class CourseServiceImpl implements CourseService {
     private final CourseMapper courseMapper;
     private final DocumentMapper documentMapper;
     private final QuestionMapper questionMapper;
+    private final QuestionBatchMapper questionBatchMapper;
     private final PracticeMapper practiceMapper;
     private final AgentDocumentCleanupService cleanupService;
     private final ChatHistoryService chatHistoryService;
+    private final PaperMapper paperMapper;
+    private final PaperQuestionMapper paperQuestionMapper;
 
     public CourseServiceImpl(CourseMapper courseMapper,
                              DocumentMapper documentMapper,
                              QuestionMapper questionMapper,
+                             QuestionBatchMapper questionBatchMapper,
                              PracticeMapper practiceMapper,
                              AgentDocumentCleanupService cleanupService,
-                             ChatHistoryService chatHistoryService) {
+                             ChatHistoryService chatHistoryService,
+                             PaperMapper paperMapper,
+                             PaperQuestionMapper paperQuestionMapper) {
         this.courseMapper = courseMapper;
         this.documentMapper = documentMapper;
         this.questionMapper = questionMapper;
+        this.questionBatchMapper = questionBatchMapper;
         this.practiceMapper = practiceMapper;
         this.cleanupService = cleanupService;
         this.chatHistoryService = chatHistoryService;
+        this.paperMapper = paperMapper;
+        this.paperQuestionMapper = paperQuestionMapper;
     }
 
     @Override
@@ -80,7 +92,12 @@ public class CourseServiceImpl implements CourseService {
         cleanupService.cleanupCourse(id);
         chatHistoryService.deleteByCourseId(id);
         practiceMapper.deleteByCourseId(id);
+        paperQuestionMapper.deleteByCourseId(id);
+        paperMapper.deleteByCourseId(id);
         questionMapper.deleteByCourseId(id);
+        questionBatchMapper.deleteDocumentsByCourseId(id);
+        questionBatchMapper.deleteChunksByCourseId(id);
+        questionBatchMapper.deleteByCourseId(id);
         documentMapper.deleteByCourseId(id);
         courseMapper.deleteById(id);
     }

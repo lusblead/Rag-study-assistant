@@ -96,7 +96,7 @@ services:
       RERANK_PROVIDER: ${RERANK_PROVIDER:-local}
       RERANK_BASE_URL: ${RERANK_BASE_URL:-https://api.siliconflow.cn/v1}
       RERANK_API_KEY: ${RERANK_API_KEY:-}
-      RERANK_MODEL: ${RERANK_MODEL:-BAAI/bge-reranker-v2-m3}
+      RERANK_MODEL: ${RERANK_MODEL:-Pro/BAAI/bge-reranker-v2-m3}
       RERANK_FAIL_OPEN: ${RERANK_FAIL_OPEN:-true}
       AGENT_MOCK: ${AGENT_MOCK:-false}
       LLM_PROVIDER: ${LLM_PROVIDER:-deepseek}

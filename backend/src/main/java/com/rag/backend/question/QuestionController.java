@@ -33,8 +33,20 @@ public class QuestionController {
     @GetMapping
     public Result<List<Question>> list(@RequestParam("courseId") Long courseId,
                                        @RequestParam(required = false) String type,
-                                       @RequestParam(required = false) String difficulty) {
-        List<Question> questions = questionService.listByCourse(courseId, type, difficulty);
+                                       @RequestParam(required = false) String difficulty,
+                                       @RequestParam(required = false) String subject) {
+        List<Question> questions = questionService.listByCourse(courseId, type, difficulty, subject);
         return Result.ok(questions);
+    }
+
+    @PutMapping("/{id}")
+    public Result<Question> update(@PathVariable Long id, @RequestBody Question question) {
+        return Result.ok(questionService.update(id, question));
+    }
+
+    @DeleteMapping("/{id}")
+    public Result<Void> delete(@PathVariable Long id) {
+        questionService.delete(id);
+        return Result.ok(null);
     }
 }

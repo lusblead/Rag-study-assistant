@@ -89,13 +89,13 @@
             <StatusBadge :status="document.parseStatus" />
             <div class="row-actions">
               <button class="ghost" type="button" @click="openPreview(document)">查看</button>
-              <button :disabled="busy" type="button" @click="ingest(document.id)">
-                {{ document.parseStatus === "PARSED" ? "重新入库" : "解析入库" }}
+              <button :disabled="busy || document.parseStatus === 'PARSING'" type="button" @click="ingest(document.id)">
+                {{ document.parseStatus === "PARSING" ? "解析中" : document.parseStatus === "PARSED" ? "重新入库" : "解析入库" }}
               </button>
               <a class="button-link ghost" :href="api.documentFileUrl(document.id)" target="_blank" rel="noreferrer">
                 下载
               </a>
-              <button class="danger" :disabled="busy" type="button" @click="removeDocument(document.id)">删除</button>
+              <button class="danger" :disabled="busy || document.parseStatus === 'PARSING'" type="button" @click="removeDocument(document.id)">删除</button>
             </div>
           </article>
         </div>
@@ -173,7 +173,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { api } from "../api";
 import CourseForm from "../components/CourseForm.vue";
 import EmptyState from "../components/EmptyState.vue";
@@ -207,6 +207,7 @@ const editCourseId = ref<number | null>(null);
 const editName = ref("");
 const editTerm = ref("");
 const editDescription = ref("");
+let statusPollTimer: number | null = null;
 
 const selectedEditCourse = computed(() => props.courses.find((item) => item.id === editCourseId.value) ?? null);
 
@@ -311,12 +312,42 @@ async function loadDocuments() {
   loading.value = true;
   try {
     documents.value = await api.listDocuments(props.course.id);
+    syncStatusPolling();
   } catch (error) {
     emit("notify", "error", error instanceof Error ? error.message : "文档加载失败");
   } finally {
     loading.value = false;
   }
 }
+
+function syncStatusPolling() {
+  const needsPolling = documents.value.some((document) => document.parseStatus === "PARSING");
+  if (needsPolling && statusPollTimer === null) {
+    statusPollTimer = window.setInterval(() => void pollDocumentStatus(), 3000);
+  } else if (!needsPolling && statusPollTimer !== null) {
+    window.clearInterval(statusPollTimer);
+    statusPollTimer = null;
+  }
+}
+
+async function pollDocumentStatus() {
+  if (!props.course) {
+    syncStatusPolling();
+    return;
+  }
+  try {
+    documents.value = await api.listDocuments(props.course.id);
+    syncStatusPolling();
+  } catch {
+    // Keep polling; a transient refresh failure must not cancel the background task UI.
+  }
+}
+
+onBeforeUnmount(() => {
+  if (statusPollTimer !== null) {
+    window.clearInterval(statusPollTimer);
+  }
+});
 
 async function upload() {
   if (!props.course || !files.value.length) {
@@ -327,19 +358,18 @@ async function upload() {
   busy.value = true;
   try {
     let uploadedCount = 0;
-    let chunkCount = 0;
     for (const selectedFile of files.value) {
       const uploaded = await api.uploadDocument(props.course.id, selectedFile);
       uploadedCount += 1;
       if (autoIngest.value) {
-        chunkCount += await api.ingestDocument(uploaded.id);
+        await api.ingestDocument(uploaded.id);
       }
     }
     emit(
       "notify",
       "success",
       autoIngest.value
-        ? `上传完成，${uploadedCount} 个文件已入库 ${chunkCount} 个知识片段`
+        ? `上传完成，${uploadedCount} 个文件已提交后台解析`
         : `上传完成 ${uploadedCount} 个文件，可在列表中手动入库`
     );
     files.value = [];
@@ -354,8 +384,8 @@ async function upload() {
 async function ingest(documentId: number) {
   busy.value = true;
   try {
-    const chunks = await api.ingestDocument(documentId);
-    emit("notify", "success", `入库完成，共 ${chunks} 个知识片段`);
+    await api.ingestDocument(documentId);
+    emit("notify", "success", "已提交后台解析任务");
     await loadDocuments();
   } catch (error) {
     emit("notify", "error", error instanceof Error ? error.message : "入库失败");

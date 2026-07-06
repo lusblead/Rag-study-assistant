@@ -9,6 +9,7 @@ import com.rag.backend.agent.retrieval.KnowledgeRetriever;
 import com.rag.backend.agent.retrieval.RetrievedChunk;
 import com.rag.backend.course.CourseMapper;
 import com.rag.backend.practice.model.PracticeRecord;
+import com.rag.backend.practice.model.PracticeSubResult;
 import com.rag.backend.question.QuestionMapper;
 import com.rag.backend.question.model.Question;
 import org.springframework.beans.factory.annotation.Value;
@@ -18,6 +19,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.Map;
+import java.util.HashMap;
+import java.math.BigDecimal;
 
 @Service
 public class PracticeServiceImpl implements PracticeService {
@@ -51,6 +55,11 @@ public class PracticeServiceImpl implements PracticeService {
 
     @Override
     public PracticeRecord submit(Long courseId, Long questionId, String userAnswer) {
+        return submit(courseId, questionId, userAnswer, null);
+    }
+
+    @Override
+    public PracticeRecord submit(Long courseId, Long questionId, String userAnswer, String answerPayload) {
         if (courseMapper.selectById(courseId) == null) {
             throw new IllegalArgumentException("Course does not exist: " + courseId);
         }
@@ -60,7 +69,9 @@ public class PracticeServiceImpl implements PracticeService {
             throw new IllegalArgumentException("Question does not exist: " + questionId);
         }
 
-        GradingResult grading = gradeAnswer(courseId, question, userAnswer);
+        GradingResult grading = answerPayload == null
+                ? gradeAnswer(courseId, question, userAnswer)
+                : gradeCompositeAnswer(question, answerPayload);
 
         PracticeRecord record = new PracticeRecord();
         record.setCourseId(courseId);
@@ -69,6 +80,11 @@ public class PracticeServiceImpl implements PracticeService {
         record.setIsCorrect(grading.correct());
         record.setGradingMode(grading.mode());
         record.setGradingFeedback(grading.feedback());
+        record.setAnswerPayload(answerPayload);
+        record.setScore(grading.score());
+        record.setMaxScore(grading.maxScore());
+        record.setGradingStatus(grading.status());
+        record.setSubResults(grading.subResults());
 
         practiceMapper.insert(record);
         return record;
@@ -82,6 +98,22 @@ public class PracticeServiceImpl implements PracticeService {
     @Override
     public List<PracticeRecord> listWrongQuestions(Long courseId) {
         return practiceMapper.selectWrongByCourseId(courseId);
+    }
+
+    @Override
+    public PracticeRecord manualGrade(Long recordId, BigDecimal score, BigDecimal maxScore, String feedback) {
+        PracticeRecord record = practiceMapper.selectById(recordId);
+        if (record == null) throw new IllegalArgumentException("练习记录不存在: " + recordId);
+        if (!"manual_required".equals(record.getGradingStatus()) && !"graded".equals(record.getGradingStatus()))
+            throw new IllegalArgumentException("当前记录不可人工批改");
+        BigDecimal resolvedMax = maxScore != null ? maxScore : record.getMaxScore();
+        if (score == null || resolvedMax == null || resolvedMax.signum() <= 0 || score.signum() < 0 || score.compareTo(resolvedMax) > 0)
+            throw new IllegalArgumentException("score 必须在 0 到 maxScore 之间");
+        record.setScore(score); record.setMaxScore(resolvedMax); record.setGradingFeedback(feedback);
+        record.setGradingMode("manual"); record.setGradingStatus("graded");
+        record.setIsCorrect(score.compareTo(resolvedMax) == 0);
+        practiceMapper.updateManualGrade(record);
+        return practiceMapper.selectById(recordId);
     }
 
     private String normalizeAnswer(String type, String answer) {
@@ -118,12 +150,21 @@ public class PracticeServiceImpl implements PracticeService {
             return gradeShortAnswerWithAi(courseId, question, userAnswer);
         }
 
+        if (Set.of(Question.TYPE_COMPOSITION, Question.TYPE_TRANSLATION,
+                Question.TYPE_EXPLANATION, Question.TYPE_SENTENCE_BREAK).contains(question.getType())
+                || Question.GRADING_MANUAL.equals(question.getGradingStrategy())) {
+            return new GradingResult(null, Question.GRADING_MANUAL,
+                    "答案已保存，等待人工评价。", null, null, "manual_required", List.of());
+        }
+
         String standardAnswer = normalizeAnswer(question.getType(), question.getAnswer());
         String submittedAnswer = normalizeAnswer(question.getType(), userAnswer);
         boolean isCorrect = !standardAnswer.isBlank() && standardAnswer.equalsIgnoreCase(submittedAnswer);
         String feedback = isCorrect ? "Rule grading: answer matches the standard answer."
                 : "Rule grading: answer does not match the standard answer.";
-        return new GradingResult(isCorrect, "rule", feedback);
+        BigDecimal score = isCorrect ? BigDecimal.ONE : BigDecimal.ZERO;
+        return new GradingResult(isCorrect, Question.GRADING_RULE, feedback,
+                score, BigDecimal.ONE, "graded", List.of());
     }
 
     private GradingResult gradeShortAnswerWithAi(Long courseId, Question question, String userAnswer) {
@@ -131,7 +172,77 @@ public class PracticeServiceImpl implements PracticeService {
         String prompt = buildShortAnswerGradingPrompt(question, userAnswer, chunks);
         String response = chatClient.call(prompt);
         AiGradingResponse parsed = parseGradingResponse(response);
-        return new GradingResult(parsed.correct(), "ai", parsed.feedback());
+        BigDecimal score = parsed.correct() ? BigDecimal.ONE : BigDecimal.ZERO;
+        return new GradingResult(parsed.correct(), Question.GRADING_AI, parsed.feedback(),
+                score, BigDecimal.ONE, "ai_graded", List.of());
+    }
+
+    private GradingResult gradeCompositeAnswer(Question question, String answerPayload) {
+        try {
+            JsonNode payload = objectMapper.readTree(answerPayload);
+            JsonNode data = objectMapper.readTree(question.getQuestionData());
+            JsonNode subQuestions = data.path("subQuestions");
+            if (!payload.path("answers").isArray() || !subQuestions.isArray()) {
+                throw new IllegalArgumentException("answerPayload.answers 和 questionData.subQuestions 必须是数组");
+            }
+            Map<String, String> submitted = new HashMap<>();
+            for (JsonNode answer : payload.path("answers")) {
+                String key = answer.path("subQuestionKey").asText();
+                if (key.isBlank() && answer.has("subQuestionIndex")) {
+                    key = "q" + (answer.path("subQuestionIndex").asInt() + 1);
+                }
+                if (!key.isBlank()) submitted.put(key, answer.path("answer").asText(""));
+            }
+            List<PracticeSubResult> results = new ArrayList<>();
+            BigDecimal score = BigDecimal.ZERO;
+            BigDecimal maxScore = BigDecimal.ZERO;
+            int pending = 0;
+            int index = 0;
+            for (JsonNode sub : subQuestions) {
+                String key = sub.path("key").asText("q" + (index + 1));
+                String type = sub.path("type").asText();
+                String strategy = sub.path("gradingStrategy").asText(defaultSubStrategy(type));
+                BigDecimal itemMax = sub.has("maxScore")
+                        ? sub.path("maxScore").decimalValue() : BigDecimal.ONE;
+                maxScore = maxScore.add(itemMax);
+                PracticeSubResult result = new PracticeSubResult();
+                result.setSubQuestionKey(key);
+                result.setReferenceAnswer(sub.path("answer").asText(null));
+                result.setExplanation(sub.path("explanation").asText(null));
+                result.setMaxScore(itemMax);
+                if (Question.GRADING_RULE.equals(strategy)) {
+                    String expected = normalizeAnswer(type, sub.path("answer").asText(""));
+                    String actual = normalizeAnswer(type, submitted.getOrDefault(key, ""));
+                    boolean correct = !expected.isBlank() && expected.equalsIgnoreCase(actual);
+                    result.setCorrect(correct);
+                    result.setScore(correct ? itemMax : BigDecimal.ZERO);
+                    result.setGradingStatus("graded");
+                    if (correct) score = score.add(itemMax);
+                } else {
+                    result.setCorrect(null);
+                    result.setScore(null);
+                    result.setGradingStatus("manual_required");
+                    pending++;
+                }
+                results.add(result);
+                index++;
+            }
+            String status = pending > 0 ? "manual_required" : "graded";
+            Boolean correct = pending > 0 ? null : score.compareTo(maxScore) == 0;
+            return new GradingResult(correct, pending > 0 ? Question.GRADING_MIXED : Question.GRADING_RULE,
+                    pending > 0 ? "客观小题已判定，主观小题等待评价。" : "复合题已完成规则判题。",
+                    score, maxScore, status, results);
+        } catch (IllegalArgumentException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new IllegalArgumentException("复合题答案格式无效", exception);
+        }
+    }
+
+    private String defaultSubStrategy(String type) {
+        return Set.of(Question.TYPE_SINGLE_CHOICE, Question.TYPE_MULTI_CHOICE,
+                Question.TYPE_TRUE_FALSE, Question.TYPE_FILL_BLANK, Question.TYPE_LANGUAGE_BASIC).contains(type)
+                ? Question.GRADING_RULE : Question.GRADING_MANUAL;
     }
 
     private List<RetrievedChunk> retrieveGradingContext(Long courseId, Question question, String userAnswer) {
@@ -275,7 +386,9 @@ public class PracticeServiceImpl implements PracticeService {
         return builder.toString();
     }
 
-    private record GradingResult(boolean correct, String mode, String feedback) {
+    private record GradingResult(Boolean correct, String mode, String feedback,
+                                 BigDecimal score, BigDecimal maxScore, String status,
+                                 List<PracticeSubResult> subResults) {
     }
 
     private record AiGradingResponse(boolean correct, String feedback) {

@@ -112,6 +112,55 @@
         </div>
       </Panel>
 
+      <Panel title="检索重排序（Rerank）">
+        <label>
+          重排序方式
+          <select v-model="form.rerankProvider">
+            <option value="none">不启用重排序</option>
+            <option value="local">本地轻量重排序</option>
+            <option value="siliconflow">SiliconFlow Rerank 模型</option>
+          </select>
+        </label>
+        <template v-if="form.rerankProvider === 'siliconflow'">
+          <label>
+            Base URL
+            <input v-model="form.rerankBaseUrl" placeholder="https://api.siliconflow.cn/v1" />
+          </label>
+          <label>
+            Model
+            <input v-model="form.rerankModel" placeholder="Pro/BAAI/bge-reranker-v2-m3" />
+          </label>
+          <label>
+            API Key
+            <input
+              v-model="form.rerankApiKey"
+              autocomplete="off"
+              :placeholder="rerankKeyPlaceholder"
+              type="password"
+            />
+          </label>
+          <label class="inline-check">
+            <input v-model="form.clearRerankApiKey" :disabled="!form.rerankApiKeySet" type="checkbox" />
+            清空已保存的 Rerank API Key
+          </label>
+          <label class="inline-check">
+            <input v-model="form.rerankFailOpen" type="checkbox" />
+            远程重排序失败时自动回退到本地重排序
+          </label>
+          <div class="test-row">
+            <button class="ghost" :disabled="saving || testingRerank" type="button" @click="testRerank">
+              {{ testingRerank ? "测试中..." : "测试 Rerank Key" }}
+            </button>
+            <span v-if="rerankTestMessage" :class="['test-result', rerankTestSuccess ? 'success' : 'error']">
+              {{ rerankTestMessage }}
+            </span>
+          </div>
+        </template>
+        <p class="setting-note">
+          不启用时保持向量检索原顺序；本地模式不需要 API Key；SiliconFlow 模式会调用 /rerank 接口。
+        </p>
+      </Panel>
+
       <Panel title="当前配置片段">
         <textarea :value="envSnippet" readonly rows="10" />
         <p class="setting-note warning">
@@ -154,13 +203,18 @@ const form = reactive<AppSettings>({
   llmApiKey: "",
   clearLlmApiKey: false,
   embeddingApiKey: "",
-  clearEmbeddingApiKey: false
+  clearEmbeddingApiKey: false,
+  rerankApiKey: "",
+  clearRerankApiKey: false
 });
 const testingTarget = ref<ModelSettingsTestTarget | null>(null);
 const llmTestMessage = ref("");
 const llmTestSuccess = ref(false);
 const embeddingTestMessage = ref("");
 const embeddingTestSuccess = ref(false);
+const testingRerank = ref(false);
+const rerankTestMessage = ref("");
+const rerankTestSuccess = ref(false);
 
 watch(
   () => props.settings,
@@ -170,7 +224,9 @@ watch(
       llmApiKey: "",
       clearLlmApiKey: false,
       embeddingApiKey: "",
-      clearEmbeddingApiKey: false
+      clearEmbeddingApiKey: false,
+      rerankApiKey: "",
+      clearRerankApiKey: false
     });
   },
   { deep: true }
@@ -184,6 +240,10 @@ const embeddingKeyPlaceholder = computed(() =>
   form.embeddingApiKeySet ? "已设置，留空保持现有 Key" : "未设置，输入后保存"
 );
 
+const rerankKeyPlaceholder = computed(() =>
+  form.rerankApiKeySet ? "已设置，留空保持现有 Key" : "未设置，可填写 SiliconFlow API Key"
+);
+
 const statusText = computed(() => {
   if (props.loading) {
     return "正在读取后端模型配置...";
@@ -193,7 +253,7 @@ const statusText = computed(() => {
   }
   return `对话 Key：${form.llmApiKeySet ? "已设置" : "未设置"}；Embedding Key：${
     form.embeddingApiKeySet ? "已设置" : "未设置"
-  }`;
+  }；Rerank：${form.rerankProvider === "none" ? "未启用" : form.rerankProvider}`;
 });
 
 const envSnippet = computed(() =>
@@ -208,7 +268,12 @@ const envSnippet = computed(() =>
     `EMBEDDING_MODEL=${form.embeddingModel}`,
     `EMBEDDING_API_KEY=${
       form.embeddingApiKey ? "<new key>" : form.embeddingApiKeySet ? "<keep current key>" : ""
-    }`
+    }`,
+    "",
+    `RERANK_PROVIDER=${form.rerankProvider}`,
+    `RERANK_BASE_URL=${form.rerankBaseUrl}`,
+    `RERANK_MODEL=${form.rerankModel}`,
+    `RERANK_API_KEY=${form.rerankApiKey ? "<new key>" : form.rerankApiKeySet ? "<keep current key>" : ""}`
   ].join("\n")
 );
 
@@ -243,5 +308,20 @@ function setTestResult(target: ModelSettingsTestTarget, success: boolean, messag
   }
   embeddingTestSuccess.value = success;
   embeddingTestMessage.value = message;
+}
+
+async function testRerank() {
+  testingRerank.value = true;
+  rerankTestMessage.value = "";
+  try {
+    await api.testRerankSettings({ ...form });
+    rerankTestSuccess.value = true;
+    rerankTestMessage.value = form.rerankProvider === "siliconflow" ? "连接成功" : "当前模式无需远程连接";
+  } catch (error) {
+    rerankTestSuccess.value = false;
+    rerankTestMessage.value = error instanceof Error ? error.message : "测试失败";
+  } finally {
+    testingRerank.value = false;
+  }
 }
 </script>

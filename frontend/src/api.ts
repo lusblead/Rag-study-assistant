@@ -8,9 +8,15 @@ import type {
   ModelSettingsResponse,
   ModelSettingsTestResponse,
   ModelSettingsTestTarget,
+  Paper,
+  PaperDetail,
+  PaperGeneratePayload,
   PracticeRecord,
   Question,
+  QuestionBatchDetail,
+  QuestionGenerationPayload,
   RagChatResponse,
+  RerankSettingsResponse,
   RetrievedChunk,
   StreamHandlers
 } from "./types";
@@ -44,7 +50,14 @@ const defaultSettings: AppSettings = {
   embeddingModel: "BAAI/bge-m3",
   embeddingApiKey: "",
   embeddingApiKeySet: false,
-  clearEmbeddingApiKey: false
+  clearEmbeddingApiKey: false,
+  rerankProvider: "local",
+  rerankBaseUrl: "https://api.siliconflow.cn/v1",
+  rerankModel: "Pro/BAAI/bge-reranker-v2-m3",
+  rerankApiKey: "",
+  rerankApiKeySet: false,
+  clearRerankApiKey: false,
+  rerankFailOpen: true
 };
 
 export function loadSettings(): AppSettings {
@@ -69,7 +82,9 @@ export function saveSettings(settings: AppSettings) {
     llmApiKey: "",
     clearLlmApiKey: false,
     embeddingApiKey: "",
-    clearEmbeddingApiKey: false
+    clearEmbeddingApiKey: false,
+    rerankApiKey: "",
+    clearRerankApiKey: false
   };
   window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(safeSettings));
 }
@@ -164,6 +179,31 @@ export const api = {
         clearEmbeddingApiKey: settings.clearEmbeddingApiKey
       })
     }),
+  getRerankSettings: () => request<RerankSettingsResponse>("/api/rerank-settings"),
+  updateRerankSettings: (settings: AppSettings) =>
+    request<RerankSettingsResponse>("/api/rerank-settings", {
+      method: "PUT",
+      body: JSON.stringify({
+        provider: settings.rerankProvider,
+        baseUrl: settings.rerankBaseUrl,
+        model: settings.rerankModel,
+        apiKey: settings.rerankApiKey || null,
+        clearApiKey: settings.clearRerankApiKey,
+        failOpen: settings.rerankFailOpen
+      })
+    }),
+  testRerankSettings: (settings: AppSettings) =>
+    request<RerankSettingsResponse>("/api/rerank-settings/test", {
+      method: "POST",
+      body: JSON.stringify({
+        provider: settings.rerankProvider,
+        baseUrl: settings.rerankBaseUrl,
+        model: settings.rerankModel,
+        apiKey: settings.rerankApiKey || null,
+        clearApiKey: settings.clearRerankApiKey,
+        failOpen: settings.rerankFailOpen
+      })
+    }),
 
   listCourses: (name?: string) => request<Course[]>(`/api/courses${query({ name })}`),
   createCourse: (payload: Partial<Course>) =>
@@ -181,7 +221,7 @@ export const api = {
     return request<CourseDocument>("/api/documents/upload", { method: "POST", body: form });
   },
   ingestDocument: (documentId: number) =>
-    request<number>(`/api/agent/documents/${documentId}/ingest`, { method: "POST" }),
+    request<CourseDocument>(`/api/documents/${documentId}/ingest`, { method: "POST" }),
   deleteDocument: (documentId: number) => request<void>(`/api/documents/${documentId}`, { method: "DELETE" }),
 
   chat: (payload: { courseId: number; sessionId?: number | null; question: string }) =>
@@ -197,20 +237,48 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ courseId, requirement })
     }),
-  listQuestions: (courseId: number, type?: string, difficulty?: string) =>
-    request<Question[]>(`/api/questions${query({ courseId, type, difficulty })}`),
+  generateQuestionBatch: (payload: QuestionGenerationPayload) =>
+    request<QuestionBatchDetail>("/api/question-batches/generate", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }),
+  listQuestionBatches: (courseId: number) =>
+    request<QuestionBatchDetail[]>(`/api/question-batches${query({ courseId })}`),
+  deleteQuestionBatch: (batchId: number) =>
+    request<void>(`/api/question-batches/${batchId}`, { method: "DELETE" }),
+  deleteQuestion: (questionId: number) =>
+    request<void>(`/api/questions/${questionId}`, { method: "DELETE" }),
+  listQuestions: (courseId: number, type?: string, difficulty?: string, subject?: string) =>
+    request<Question[]>(`/api/questions${query({ courseId, type, difficulty, subject })}`),
   saveQuestion: (payload: Partial<Question>) =>
     request<Question>("/api/questions", { method: "POST", body: JSON.stringify(payload) }),
+  updateQuestion: (questionId: number, payload: Partial<Question>) =>
+    request<Question>(`/api/questions/${questionId}`, { method: "PUT", body: JSON.stringify(payload) }),
+
+  generatePaper: (payload: PaperGeneratePayload) =>
+    request<PaperDetail>("/api/papers/generate", { method: "POST", body: JSON.stringify(payload) }),
+  listPapers: (courseId: number) => request<Paper[]>(`/api/papers${query({ courseId, subject: "chinese" })}`),
+  getPaper: (paperId: number) => request<PaperDetail>(`/api/papers/${paperId}`),
+  updatePaper: (paperId: number, payload: Partial<Paper>) =>
+    request<PaperDetail>(`/api/papers/${paperId}`, { method: "PUT", body: JSON.stringify(payload) }),
+  deletePaper: (paperId: number) => request<void>(`/api/papers/${paperId}`, { method: "DELETE" }),
 
   submitAnswer: (courseId: number, questionId: number, userAnswer: string) =>
     request<PracticeRecord>("/api/practice/submit", {
       method: "POST",
       body: JSON.stringify({ courseId, questionId, userAnswer })
     }),
+  submitCompositeAnswer: (courseId: number, questionId: number, answers: Array<{ subQuestionKey: string; answer: string }>) =>
+    request<PracticeRecord>("/api/practice/submit", {
+      method: "POST",
+      body: JSON.stringify({ courseId, questionId, answerPayload: { answers } })
+    }),
   listPracticeRecords: (courseId: number) =>
     request<PracticeRecord[]>(`/api/courses/${courseId}/practice/records`),
   listWrongQuestions: (courseId: number) =>
-    request<PracticeRecord[]>(`/api/courses/${courseId}/practice/wrong-questions`)
+    request<PracticeRecord[]>(`/api/courses/${courseId}/practice/wrong-questions`),
+  manualGrade: (recordId: number, score: number, maxScore: number, feedback: string) =>
+    request<PracticeRecord>(`/api/practice/records/${recordId}/grade`, { method: "PUT", body: JSON.stringify({ score, maxScore, feedback }) })
 };
 
 export async function streamChat(

@@ -228,6 +228,13 @@ DELETE /api/documents/{id}
 ### 4. 文档状态流转
 
 ```
+POST /api/documents/{id}/ingest
+```
+
+该接口异步提交文档解析任务，返回 HTTP `202 Accepted` 和状态为 `PARSING` 的文档。
+客户端通过 `GET /api/documents?courseId={courseId}` 轮询最终状态。同一文档正在解析时重复提交返回 `409 Conflict`。
+
+```
 UPLOADED ──→ PARSING ──→ PARSED
                 │
                 └──→ FAILED
@@ -257,7 +264,9 @@ Content-Type: application/json
   "explanation": "网络层是 OSI 模型的第三层，负责路由选择和数据转发。",
   "difficulty": "medium",
   "knowledgePoint": "OSI 参考模型",
-  "sourceChunkId": null
+  "sourceChunkId": 12,
+  "sourceDocumentId": 3,
+  "chapterTags": "[\"第三章\",\"第五章\"]"
 }
 ```
 
@@ -266,7 +275,7 @@ Content-Type: application/json
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | courseId | Long | 是 | 课程ID |
-| type | String | 是 | single_choice / multi_choice / true_false / short_answer |
+| type | String | 是 | 通用题型及 fill_blank / composition / classical_chinese_reading / poetry_appreciation / modern_reading / translation / sentence_break / explanation / language_basic |
 | stem | String | 是 | 题干 |
 | options | String | 否 | JSON 数组字符串，如 `["A.X","B.Y"]` |
 | answer | String | 是 | 见下方格式约定 |
@@ -274,6 +283,12 @@ Content-Type: application/json
 | difficulty | String | 否 | easy / medium / hard |
 | knowledgePoint | String | 否 | 知识点 |
 | sourceChunkId | Long | 否 | 来源知识片段ID |
+| sourceDocumentId | Long | 否 | 查询响应字段，由来源知识片段关联得到的文件ID；保存请求无需填写 |
+| chapterTags | String | 否 | JSON 章节数组；一道题可属于多个章节 |
+| subject | String | 否 | general（默认）/ chinese |
+| questionData | String | 复杂题必填 | JSON 对象字符串；保存材料、作文要求及 subQuestions |
+| answerSchema | String | 否 | JSON 对象字符串；保存评分点和评分量表 |
+| gradingStrategy | String | 否 | rule / manual / ai / mixed；未传时按题型确定 |
 
 **题型对应的 answer 格式：**
 - `single_choice`：`"A"` / `"B"` / `"C"` / `"D"`
@@ -288,6 +303,7 @@ Content-Type: application/json
 ```
 GET /api/questions?courseId=1
 GET /api/questions?courseId=1&type=single_choice&difficulty=medium
+GET /api/questions?courseId=1&subject=chinese&type=composition
 ```
 
 | 参数 | 类型 | 必填 | 说明 |
@@ -295,6 +311,7 @@ GET /api/questions?courseId=1&type=single_choice&difficulty=medium
 | courseId | Long | 是 | 课程ID |
 | type | String | 否 | 题型筛选 |
 | difficulty | String | 否 | 难度筛选 |
+| subject | String | 否 | 学科筛选；不传时保持原有行为 |
 
 ---
 
@@ -334,6 +351,23 @@ Content-Type: application/json
 ```
 
 **错误：** `400` 课程不存在 / 题目不存在
+
+复合题使用 `answerPayload` 提交，每个小题通过稳定的 `subQuestionKey` 对应：
+
+```json
+{
+  "courseId": 1,
+  "questionId": 8,
+  "answerPayload": {
+    "answers": [
+      {"subQuestionKey": "q1", "answer": "A"},
+      {"subQuestionKey": "q2", "answer": "参考译文"}
+    ]
+  }
+}
+```
+
+客观小题立即判定，主观小题返回 `isCorrect: null` 和 `gradingStatus: "manual_required"`；结果中的 `subResults` 分别给出各小题状态、参考答案与解析。
 
 ### 2. 练习记录列表
 
@@ -475,3 +509,18 @@ mvn spring-boot:run -pl backend
 ```
 
 前提：本地 MySQL 已启动，数据库和表会自动创建。
+# 结构化语文试卷
+
+本项目将“普通出题批次”和“可预览、排序、打印的试卷”分开建模。试卷生成按大题分段执行，某一分区失败时会保留其他成功分区，并在 `warnings` 返回原因。
+
+- `POST /api/papers/generate`：生成并保存完整语文套卷。核心字段：`courseId`、`documentIds`、`title`、`difficulty`、`durationMinutes`、`totalScore`、`templateCode`、`requirements`。
+- `GET /api/papers?courseId=1&subject=chinese`：试卷列表。
+- `GET /api/papers/{id}`：按大题返回试卷、分值和完整题目。
+- `PUT /api/papers/{id}`、`DELETE /api/papers/{id}`：更新元数据、删除试卷结构。删除试卷不删除题库原题。
+- `POST /api/papers/{id}/questions`：加入题库已有题目。
+- `PUT /api/papers/{id}/questions/reorder`：调整大题、顺序和分值。
+- `DELETE /api/papers/{id}/questions/{questionId}`：仅从试卷移除题目。
+- `PUT /api/questions/{id}`：编辑题目；复合题需继续提供合法的 `material` 和非空 `subQuestions`。
+- `PUT /api/practice/records/{recordId}/grade`：人工批改，body 为 `score`、`maxScore`、`feedback`。
+
+当前内置模板为 `chinese_high_school_standard_v1`（默认）和 `chinese_middle_school_standard_v1`。两者当前共用稳定的六大题骨架，后续可按年级拆分具体分值与题型。

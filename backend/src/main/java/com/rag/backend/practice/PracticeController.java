@@ -3,6 +3,7 @@ package com.rag.backend.practice;
 import com.rag.backend.common.Result;
 import com.rag.backend.practice.model.PracticeRecord;
 import com.rag.backend.practice.model.SubmitAnswerRequest;
+import com.rag.backend.practice.model.ManualGradeRequest;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -23,7 +24,8 @@ public class PracticeController {
     @PostMapping("/api/practice/submit")
     public Result<PracticeRecord> submit(@RequestBody SubmitAnswerRequest request) {
         PracticeRecord record = practiceService.submit(
-                request.getCourseId(), request.getQuestionId(), request.getUserAnswer());
+                request.getCourseId(), request.getQuestionId(), request.getUserAnswer(),
+                request.getAnswerPayload() == null ? null : request.getAnswerPayload().toString());
         return Result.ok(record);
     }
 
@@ -45,5 +47,10 @@ public class PracticeController {
     public Result<List<PracticeRecord>> listWrongQuestions(@PathVariable Long courseId) {
         List<PracticeRecord> records = practiceService.listWrongQuestions(courseId);
         return Result.ok(records);
+    }
+
+    @PutMapping("/api/practice/records/{recordId}/grade")
+    public Result<PracticeRecord> manualGrade(@PathVariable Long recordId, @RequestBody ManualGradeRequest request) {
+        return Result.ok(practiceService.manualGrade(recordId, request.score(), request.maxScore(), request.feedback()));
     }
 }

@@ -2,6 +2,7 @@ package com.rag.backend.document;
 
 import com.rag.backend.common.BizException;
 import com.rag.backend.common.Result;
+import com.rag.backend.common.TextFileDecoder;
 import com.rag.backend.document.model.CourseDocument;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
@@ -23,9 +24,12 @@ import java.util.List;
 public class DocumentController {
 
     private final DocumentService documentService;
+    private final DocumentIngestTaskService ingestTaskService;
 
-    public DocumentController(DocumentService documentService) {
+    public DocumentController(DocumentService documentService,
+                              DocumentIngestTaskService ingestTaskService) {
         this.documentService = documentService;
+        this.ingestTaskService = ingestTaskService;
     }
 
     /**
@@ -49,8 +53,14 @@ public class DocumentController {
         return Result.ok(documents);
     }
 
+    @PostMapping("/{id}/ingest")
+    public ResponseEntity<Result<CourseDocument>> ingest(@PathVariable Long id) {
+        CourseDocument document = ingestTaskService.submit(id);
+        return ResponseEntity.accepted().body(Result.ok(document));
+    }
+
     @GetMapping("/{id}/file")
-    public ResponseEntity<Resource> viewFile(@PathVariable Long id) {
+    public ResponseEntity<?> viewFile(@PathVariable Long id) {
         CourseDocument document = documentService.getById(id);
         try {
             Path filePath = Path.of(document.getFilePath()).toAbsolutePath().normalize();
@@ -62,6 +72,12 @@ public class DocumentController {
                     .orElse(MediaType.APPLICATION_OCTET_STREAM);
             String encodedFilename = URLEncoder.encode(document.getFilename(), StandardCharsets.UTF_8)
                     .replace("+", "%20");
+            if (isTextPreview(document.getFileType())) {
+                return ResponseEntity.ok()
+                        .contentType(textPreviewMediaType(document.getFileType()))
+                        .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename*=UTF-8''" + encodedFilename)
+                        .body(TextFileDecoder.readString(filePath));
+            }
             return ResponseEntity.ok()
                     .contentType(mediaType)
                     .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename*=UTF-8''" + encodedFilename)
@@ -71,6 +87,19 @@ public class DocumentController {
         } catch (Exception e) {
             throw new BizException(500, "Failed to open uploaded file: " + e.getMessage());
         }
+    }
+
+    private boolean isTextPreview(String fileType) {
+        return "txt".equalsIgnoreCase(fileType)
+                || "md".equalsIgnoreCase(fileType)
+                || "markdown".equalsIgnoreCase(fileType);
+    }
+
+    private MediaType textPreviewMediaType(String fileType) {
+        if ("md".equalsIgnoreCase(fileType) || "markdown".equalsIgnoreCase(fileType)) {
+            return MediaType.parseMediaType("text/markdown;charset=UTF-8");
+        }
+        return new MediaType("text", "plain", StandardCharsets.UTF_8);
     }
 
     /**

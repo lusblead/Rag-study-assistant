@@ -10,6 +10,9 @@ public interface QuestionService {
      * 保存单个题目
      */
     Question save(Question question);
+    default Question update(Long id, Question question) {
+        throw new UnsupportedOperationException("Update is not implemented");
+    }
 
     /**
      * 批量保存题目（供同学C的AI出题模块调用）
@@ -23,4 +26,12 @@ public interface QuestionService {
      * @param difficulty 难度筛选（可选）
      */
     List<Question> listByCourse(Long courseId, String type, String difficulty);
+
+    default List<Question> listByCourse(Long courseId, String type, String difficulty, String subject) {
+        return listByCourse(courseId, type, difficulty);
+    }
+
+    default void delete(Long id) {
+        throw new UnsupportedOperationException("Delete is not implemented");
+    }
 }

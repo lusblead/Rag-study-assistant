@@ -160,9 +160,9 @@ label {
   background: rgba(245, 247, 246, 0.92);
   border-bottom: 1px solid var(--line);
   display: grid;
-  gap: 16px;
-  grid-template-columns: minmax(220px, 280px) 1fr auto;
-  padding: 12px 28px;
+  gap: 10px;
+  grid-template-columns: minmax(205px, 250px) 1fr auto;
+  padding: 8px 20px;
   position: sticky;
   top: 0;
   z-index: 10;
@@ -189,9 +189,9 @@ label {
   color: #fff;
   display: inline-flex;
   font-weight: 800;
-  height: 38px;
+  height: 34px;
   justify-content: center;
-  width: 38px;
+  width: 34px;
 }
 
 .brand strong,
@@ -202,13 +202,13 @@ label {
 
 .brand small {
   color: var(--muted);
-  font-size: 12px;
-  margin-top: 2px;
+  font-size: 11px;
+  margin-top: 1px;
 }
 
 .nav {
   display: flex;
-  gap: 8px;
+  gap: 4px;
   justify-content: center;
 }
 
@@ -216,6 +216,15 @@ label {
   background: transparent;
   border-color: transparent;
   color: var(--muted);
+  min-height: 34px;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
+.nav-route-icon {
+  display: none;
+  height: 19px;
+  width: 19px;
 }
 
 .nav button.active,
@@ -228,17 +237,25 @@ label {
 .top-actions {
   align-items: center;
   display: flex;
-  gap: 8px;
+  gap: 6px;
 }
 
 .top-actions select {
-  min-width: 180px;
+  min-height: 34px;
+  min-width: 160px;
+  padding-block: 6px;
+}
+
+.top-actions button {
+  min-height: 34px;
+  padding: 6px 10px;
 }
 
 .main {
   margin: 0 auto;
-  max-width: 1440px;
+  max-width: 1680px;
   padding: 28px;
+  width: 100%;
 }
 
 .banner {
@@ -371,7 +388,8 @@ label {
 }
 
 .practice-grid {
-  grid-template-columns: 360px minmax(0, 1fr);
+  gap: 28px;
+  grid-template-columns: 300px minmax(0, 1fr);
 }
 
 .side-panel,
@@ -681,7 +699,7 @@ label {
 .chat-layout {
   display: grid;
   gap: 14px;
-  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-columns: 190px minmax(0, 1fr);
   height: calc(100vh - 112px);
   min-height: 620px;
 }
@@ -812,7 +830,7 @@ label {
 .message {
   display: grid;
   gap: 6px;
-  max-width: 86%;
+  max-width: 92%;
 }
 
 .message.user {
@@ -850,6 +868,8 @@ label {
   margin-bottom: 0;
 }
 
+.markdown-body h1,
+.markdown-body h2,
 .markdown-body h3,
 .markdown-body h4,
 .markdown-body h5,
@@ -857,6 +877,14 @@ label {
   color: var(--text);
   line-height: 1.45;
   margin: 14px 0 8px;
+}
+
+.markdown-body h1 {
+  font-size: 20px;
+}
+
+.markdown-body h2 {
+  font-size: 18px;
 }
 
 .markdown-body h3 {
@@ -906,6 +934,48 @@ label {
   background: transparent;
   color: inherit;
   padding: 0;
+}
+
+.markdown-body blockquote {
+  border-left: 4px solid var(--primary);
+  color: var(--muted);
+  margin: 10px 0;
+  padding: 2px 0 2px 12px;
+}
+
+.markdown-body table {
+  border-collapse: collapse;
+  display: block;
+  margin: 10px 0;
+  max-width: 100%;
+  overflow-x: auto;
+  width: max-content;
+}
+
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid var(--line);
+  padding: 7px 10px;
+  text-align: left;
+}
+
+.markdown-body th {
+  background: #eaf2ee;
+}
+
+.markdown-body a {
+  color: var(--primary);
+  overflow-wrap: anywhere;
+}
+
+.markdown-body hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 14px 0;
+}
+
+.markdown-body input[type="checkbox"] {
+  margin-right: 6px;
 }
 
 .message.user .message-body {
@@ -1012,6 +1082,305 @@ label {
   gap: 14px;
 }
 
+.practice-sidebar {
+  margin-left: 0;
+}
+
+.practice-content {
+  margin-inline: auto;
+  max-width: 1280px;
+  width: 100%;
+}
+
+.mode-switch {
+  background: var(--surface-soft);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 4px;
+}
+
+.mode-switch button {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+  min-height: 34px;
+  padding: 6px 8px;
+}
+
+.mode-switch button.active {
+  background: #fff;
+  border-color: var(--line);
+  color: var(--primary-strong);
+}
+
+.document-scope {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin: 0;
+  min-width: 0;
+  padding: 10px;
+}
+
+.scope-field {
+  display: grid;
+  gap: 7px;
+}
+
+.field-label {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.scope-trigger {
+  align-items: center;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  color: var(--text);
+  display: flex;
+  justify-content: space-between;
+  min-height: 84px;
+  padding: 15px 17px;
+  text-align: left;
+  width: 100%;
+}
+
+.scope-trigger > span:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.scope-trigger small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.scope-trigger > span:last-child {
+  font-size: 24px;
+}
+
+.batch-picker {
+  align-items: center;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  display: flex;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+}
+
+.batch-picker label {
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.batch-picker select {
+  flex: 1;
+  min-width: 0;
+}
+
+.scope-dialog-backdrop {
+  align-items: center;
+  background: rgba(10, 23, 19, 0.48);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 20px;
+  position: fixed;
+  z-index: 1000;
+}
+
+.scope-dialog {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: 0 24px 70px rgba(8, 27, 21, 0.22);
+  display: grid;
+  gap: 14px;
+  min-height: min(560px, calc(100vh - 40px));
+  max-height: min(820px, calc(100vh - 40px));
+  max-width: 880px;
+  overflow: hidden;
+  padding: 20px;
+  width: 100%;
+}
+
+.scope-dialog > header,
+.scope-dialog > footer {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.scope-dialog h2,
+.scope-dialog p {
+  margin: 0;
+}
+
+.scope-dialog > p,
+.scope-dialog > footer span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.scope-all-option {
+  align-items: flex-start;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  color: var(--text);
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  text-align: left;
+}
+
+.scope-all-option.active {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+}
+
+.scope-all-option span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.dialog-scope-list {
+  max-height: min(500px, 52vh);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.document-scope legend {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 750;
+  padding: 0 5px;
+}
+
+.document-scope p,
+.document-scope small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0 0 8px;
+}
+
+.scope-list {
+  display: grid;
+  gap: 5px;
+  max-height: 150px;
+  overflow: auto;
+}
+
+.scope-option {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  display: grid;
+  gap: 7px;
+  grid-template-columns: auto minmax(0, 1fr);
+  padding: 11px 12px;
+}
+
+.chapter-badge {
+  background: #eef5ff;
+  border-color: #c9ddfb;
+  color: #245da8;
+}
+
+.scope-option input,
+.reference-toggle input {
+  min-height: auto;
+  width: auto;
+}
+
+.scope-option span {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reference-toggle {
+  color: var(--text);
+}
+
+.batch-list {
+  display: grid;
+  gap: 22px;
+}
+
+.question-batch {
+  display: grid;
+  gap: 14px;
+}
+
+.batch-header {
+  align-items: flex-start;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--primary);
+  border-radius: 8px;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding: 14px 16px;
+}
+
+.batch-title-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.batch-title-row h2 {
+  font-size: 20px;
+  margin: 0;
+}
+
+.batch-header p {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 7px 0 0;
+}
+
+.batch-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 7px;
+}
+
+.batch-actions button {
+  min-height: 34px;
+  padding: 6px 10px;
+}
+
+.style-summary {
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.style-summary summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.style-summary p {
+  color: var(--muted);
+  line-height: 1.65;
+  margin: 8px 0 0;
+}
+
 .question-card {
   background: var(--surface);
   border: 1px solid var(--line);
@@ -1038,6 +1407,12 @@ label {
 .question-head > span:first-child {
   color: var(--muted);
   font-weight: 800;
+}
+
+.question-delete {
+  margin-left: auto;
+  min-height: 30px;
+  padding: 4px 9px;
 }
 
 .option-list {
@@ -1222,17 +1597,23 @@ label {
 
 @media (max-width: 1180px) {
   .topbar {
-    grid-template-columns: 1fr;
+    gap: 7px 12px;
+    grid-template-columns: minmax(200px, 1fr) auto;
+    padding: 8px 18px;
   }
 
-  .nav,
-  .top-actions {
+  .nav {
+    grid-column: 1 / -1;
     justify-content: flex-start;
     overflow-x: auto;
   }
 
+  .top-actions {
+    justify-content: flex-end;
+  }
+
   .chat-layout {
-    grid-template-columns: 210px minmax(0, 1fr);
+    grid-template-columns: 180px minmax(0, 1fr);
   }
 
   .chat-layout.sidebar-collapsed {
@@ -1299,5 +1680,87 @@ label {
 
   .message {
     max-width: 100%;
+  }
+
+  .batch-header {
+    display: grid;
+  }
+
+  .batch-actions {
+    width: 100%;
+  }
+
+  .batch-actions button {
+    flex: 1;
+  }
+}
+
+@media (max-width: 700px) {
+
+  .batch-picker {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 7px;
+  }
+
+  .scope-dialog-backdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .scope-dialog {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    max-height: 86vh;
+  }
+  .topbar {
+    gap: 6px;
+    grid-template-columns: 1fr;
+    padding: 7px 12px 8px;
+  }
+
+  .brand {
+    display: none;
+  }
+
+  .nav {
+    display: grid;
+    gap: 4px;
+    grid-column: auto;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    overflow: visible;
+    width: 100%;
+  }
+
+  .nav button {
+    min-height: 34px;
+    padding: 5px;
+  }
+
+  .nav-route-icon {
+    display: block;
+  }
+
+  .nav-route-label {
+    display: none;
+  }
+
+  .top-actions {
+    display: grid;
+    gap: 5px;
+    grid-template-columns: minmax(0, 1fr);
+    justify-content: stretch;
+    overflow: visible;
+    width: 100%;
+  }
+
+  .top-actions select {
+    min-height: 34px;
+    min-width: 0;
+    padding: 5px 8px;
+  }
+
+  .top-actions button {
+    display: none;
   }
 }

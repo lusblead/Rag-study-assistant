@@ -1,5 +1,25 @@
 export type RouteKey = "home" | "knowledge" | "chat" | "practice" | "settings" | "help";
 
+export type Paper = {
+  id: number; courseId: number; subject: string; title: string; paperType?: string;
+  gradeLevel?: string; difficulty?: string; durationMinutes?: number; totalScore?: number;
+  templateCode?: string; requirements?: string; createdAt?: string; updatedAt?: string;
+};
+export type PaperQuestion = {
+  id: number; paperId: number; questionId: number; sectionKey: string; sectionTitle: string;
+  sectionInstructions?: string; questionOrder: number; score?: number; question: Question;
+};
+export type PaperDetail = {
+  paper: Paper;
+  sections: Array<{ sectionKey: string; title: string; instructions?: string; score: number; questions: PaperQuestion[] }>;
+  warnings: string[];
+};
+export type PaperGeneratePayload = {
+  courseId: number; documentIds: number[]; subject: "chinese"; title?: string;
+  paperType?: string; gradeLevel?: string; difficulty?: string; durationMinutes?: number;
+  totalScore?: number; templateCode?: string; requirements?: string;
+};
+
 export type ApiResult<T> = {
   code: number;
   message: string;
@@ -57,13 +77,18 @@ export type ChatMessage = {
   createdAt?: string;
 };
 
-export type QuestionType = "single_choice" | "multi_choice" | "true_false" | "short_answer" | string;
+export type SubjectType = "general" | "chinese";
+export type QuestionType = "single_choice" | "multi_choice" | "true_false" | "short_answer"
+  | "fill_blank" | "composition" | "classical_chinese_reading" | "poetry_appreciation"
+  | "modern_reading" | "translation" | "sentence_break" | "explanation" | "language_basic" | string;
 export type Difficulty = "easy" | "medium" | "hard" | string;
 
 export type Question = {
   id: number;
   courseId: number;
   sourceChunkId?: number | null;
+  sourceDocumentId?: number | null;
+  batchId?: number | null;
   type: QuestionType;
   stem: string;
   options?: string;
@@ -71,6 +96,11 @@ export type Question = {
   explanation?: string;
   difficulty?: Difficulty;
   knowledgePoint?: string;
+  chapterTags?: string;
+  subject?: SubjectType;
+  questionData?: string;
+  answerSchema?: string;
+  gradingStrategy?: "rule" | "manual" | "ai" | "mixed";
   createdAt?: string;
 };
 
@@ -79,9 +109,22 @@ export type PracticeRecord = {
   courseId: number;
   questionId: number;
   userAnswer: string;
-  isCorrect?: boolean;
-  gradingMode?: "rule" | "ai" | string;
+  isCorrect?: boolean | null;
+  gradingMode?: "rule" | "ai" | "manual" | "mixed" | string;
   gradingFeedback?: string;
+  answerPayload?: string;
+  score?: number | null;
+  maxScore?: number | null;
+  gradingStatus?: "graded" | "pending" | "manual_required" | "ai_graded" | string;
+  subResults?: Array<{
+    subQuestionKey: string;
+    correct?: boolean | null;
+    referenceAnswer?: string;
+    explanation?: string;
+    score?: number | null;
+    maxScore?: number | null;
+    gradingStatus?: string;
+  }>;
   createdAt?: string;
 };
 
@@ -99,6 +142,49 @@ export type AppSettings = {
   embeddingApiKey: string;
   embeddingApiKeySet: boolean;
   clearEmbeddingApiKey: boolean;
+  rerankProvider: "none" | "local" | "siliconflow" | string;
+  rerankBaseUrl: string;
+  rerankModel: string;
+  rerankApiKey: string;
+  rerankApiKeySet: boolean;
+  clearRerankApiKey: boolean;
+  rerankFailOpen: boolean;
+};
+
+export type QuestionBatch = {
+  id: number;
+  courseId: number;
+  title: string;
+  mode: "practice" | "exam" | string;
+  requirement?: string;
+  questionCount: number;
+  questionType?: string;
+  difficulty?: string;
+  referenceRealQuestions?: boolean;
+  styleSummary?: string;
+  createdAt?: string;
+};
+
+export type QuestionBatchDetail = {
+  batch: QuestionBatch;
+  questions: Question[];
+  documentIds: number[];
+  chunkIds: number[];
+};
+
+export type QuestionGenerationPayload = {
+  courseId: number;
+  count: number;
+  type: string;
+  difficulty: string;
+  requirement: string;
+  mode: "practice" | "exam";
+  title?: string;
+  documentIds: number[];
+  referenceRealQuestions: boolean;
+  styleDocumentIds: number[];
+  subject?: SubjectType;
+  questionTypes?: string[];
 };
 
 export type ModelSettingsResponse = {
@@ -110,6 +196,14 @@ export type ModelSettingsResponse = {
   embeddingBaseUrl: string;
   embeddingModel: string;
   embeddingApiKeySet: boolean;
+};
+
+export type RerankSettingsResponse = {
+  provider: "none" | "local" | "siliconflow" | string;
+  baseUrl: string;
+  model: string;
+  apiKeySet: boolean;
+  failOpen: boolean;
 };
 
 export type ModelSettingsTestTarget = "llm" | "embedding";

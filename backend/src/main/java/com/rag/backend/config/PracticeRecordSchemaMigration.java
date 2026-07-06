@@ -19,6 +19,10 @@ public class PracticeRecordSchemaMigration {
     public void migrate() {
         addColumnIfMissing("grading_mode", "VARCHAR(40)");
         addColumnIfMissing("grading_feedback", "TEXT");
+        addColumnIfMissing("answer_payload", "TEXT");
+        addColumnIfMissing("score", "DECIMAL(7,2)");
+        addColumnIfMissing("max_score", "DECIMAL(7,2)");
+        addColumnIfMissing("grading_status", "VARCHAR(32) NOT NULL DEFAULT 'graded'");
     }
 
     private void addColumnIfMissing(String columnName, String definition) {

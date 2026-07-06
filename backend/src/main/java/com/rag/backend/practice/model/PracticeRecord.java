@@ -1,6 +1,8 @@
 package com.rag.backend.practice.model;
 
 import java.time.LocalDateTime;
+import java.math.BigDecimal;
+import java.util.List;
 
 public class PracticeRecord {
 
@@ -17,6 +19,12 @@ public class PracticeRecord {
     private String gradingMode;
 
     private String gradingFeedback;
+
+    private String answerPayload;
+    private BigDecimal score;
+    private BigDecimal maxScore;
+    private String gradingStatus;
+    private List<PracticeSubResult> subResults;
 
     private LocalDateTime createdAt;
 
@@ -42,6 +50,17 @@ public class PracticeRecord {
 
     public String getGradingFeedback() { return gradingFeedback; }
     public void setGradingFeedback(String gradingFeedback) { this.gradingFeedback = gradingFeedback; }
+
+    public String getAnswerPayload() { return answerPayload; }
+    public void setAnswerPayload(String answerPayload) { this.answerPayload = answerPayload; }
+    public BigDecimal getScore() { return score; }
+    public void setScore(BigDecimal score) { this.score = score; }
+    public BigDecimal getMaxScore() { return maxScore; }
+    public void setMaxScore(BigDecimal maxScore) { this.maxScore = maxScore; }
+    public String getGradingStatus() { return gradingStatus; }
+    public void setGradingStatus(String gradingStatus) { this.gradingStatus = gradingStatus; }
+    public List<PracticeSubResult> getSubResults() { return subResults; }
+    public void setSubResults(List<PracticeSubResult> subResults) { this.subResults = subResults; }
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }

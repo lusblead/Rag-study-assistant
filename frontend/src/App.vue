@@ -14,10 +14,13 @@
           v-for="item in mainRoutes"
           :key="item"
           :class="{ active: route === item }"
+          :aria-label="routeLabels[item]"
+          :title="routeLabels[item]"
           type="button"
           @click="navigate(item)"
         >
-          {{ routeLabels[item] }}
+          <component :is="routeIcons[item]" class="nav-route-icon" aria-hidden="true" />
+          <span class="nav-route-label">{{ routeLabels[item] }}</span>
         </button>
       </nav>
 
@@ -87,8 +90,9 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
+import { LayoutDashboard, LibraryBig, ListChecks, MessageCircle } from "lucide-vue-next";
 import { api, loadSettings, saveSettings } from "./api";
-import type { AppSettings, Course, ModelSettingsResponse, RouteKey } from "./types";
+import type { AppSettings, Course, ModelSettingsResponse, RerankSettingsResponse, RouteKey } from "./types";
 import ChatPage from "./pages/ChatPage.vue";
 import HelpPage from "./pages/HelpPage.vue";
 import HomePage from "./pages/HomePage.vue";
@@ -112,7 +116,13 @@ const routeLabels: Record<RouteKey, string> = {
   help: "说明"
 };
 
-const mainRoutes: RouteKey[] = ["home", "knowledge", "chat", "practice"];
+const mainRoutes = ["home", "knowledge", "chat", "practice"] as const;
+const routeIcons = {
+  home: LayoutDashboard,
+  knowledge: LibraryBig,
+  chat: MessageCircle,
+  practice: ListChecks
+};
 const validRoutes = new Set<RouteKey>(["home", "knowledge", "chat", "practice", "settings", "help"]);
 
 const route = ref<RouteKey>(getRouteFromHash());
@@ -214,8 +224,11 @@ async function handleCourseUpdated() {
 async function loadModelSettings() {
   loadingModelSettings.value = true;
   try {
-    const modelSettings = await api.getModelSettings();
-    settings.value = mergeModelSettings(settings.value, modelSettings);
+    const [modelSettings, rerankSettings] = await Promise.all([
+      api.getModelSettings(),
+      api.getRerankSettings()
+    ]);
+    settings.value = mergeRerankSettings(mergeModelSettings(settings.value, modelSettings), rerankSettings);
     saveSettings(settings.value);
   } catch (error) {
     if (route.value === "settings") {
@@ -232,8 +245,11 @@ async function handleSaveModelSettings(nextSettings: AppSettings) {
   saveSettings(nextSettings);
 
   try {
-    const modelSettings = await api.updateModelSettings(nextSettings);
-    settings.value = mergeModelSettings(nextSettings, modelSettings);
+    const [modelSettings, rerankSettings] = await Promise.all([
+      api.updateModelSettings(nextSettings),
+      api.updateRerankSettings(nextSettings)
+    ]);
+    settings.value = mergeRerankSettings(mergeModelSettings(nextSettings, modelSettings), rerankSettings);
     saveSettings(settings.value);
     notify("success", "设置已保存，后端会立即使用新的模型配置");
     void loadCourses();
@@ -242,6 +258,19 @@ async function handleSaveModelSettings(nextSettings: AppSettings) {
   } finally {
     savingSettings.value = false;
   }
+}
+
+function mergeRerankSettings(base: AppSettings, rerank: RerankSettingsResponse): AppSettings {
+  return {
+    ...base,
+    rerankProvider: rerank.provider,
+    rerankBaseUrl: rerank.baseUrl,
+    rerankModel: rerank.model,
+    rerankApiKey: "",
+    rerankApiKeySet: rerank.apiKeySet,
+    clearRerankApiKey: false,
+    rerankFailOpen: rerank.failOpen
+  };
 }
 
 function mergeModelSettings(base: AppSettings, modelSettings: ModelSettingsResponse): AppSettings {
