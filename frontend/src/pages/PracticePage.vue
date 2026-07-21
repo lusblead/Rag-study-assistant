@@ -17,18 +17,18 @@
         </label>
 
         <div class="generation-grid">
-          <label>
+          <label v-if="generationMode === 'practice'">
             学科
             <select v-model="generateSubject" :disabled="!course || busy">
               <option value="general">通用</option>
               <option value="chinese">语文</option>
             </select>
           </label>
-          <label v-if="generateSubject === 'general'">
+          <label v-if="generationMode === 'practice' && generateSubject === 'general'">
             数量
-            <input v-model.number="questionCount" :disabled="!course || busy" :max="generationMode === 'exam' ? 60 : 20" min="1" type="number" />
+            <input v-model.number="questionCount" :disabled="!course || busy" max="20" min="1" type="number" />
           </label>
-          <label>
+          <label v-if="generationMode === 'practice' && generateSubject === 'general'">
             题型
             <select v-model="generateType" :disabled="!course || busy">
               <option value="mixed">混合题型</option>
@@ -49,13 +49,23 @@
           </label>
         </div>
 
-        <fieldset v-if="generateSubject === 'chinese'" class="document-scope">
+        <fieldset v-if="generationMode === 'practice' && generateSubject === 'chinese'" class="document-scope">
           <legend>语文题型（可多选）</legend>
           <div class="scope-list">
             <label v-for="option in chineseTypeOptions" :key="option.value" class="scope-option">
               <input v-model="generateTypes" :value="option.value" type="checkbox" />
               <span>{{ option.label }}</span>
             </label>
+          </div>
+        </fieldset>
+
+        <fieldset v-if="generationMode === 'exam'" class="document-scope paper-template-summary">
+          <legend>语文套卷结构</legend>
+          <p>套卷题型由语文模板统一规划，不使用通用题型筛选。</p>
+          <div class="scope-list">
+            <div v-for="section in paperTemplateSections" :key="section" class="scope-option fixed-option">
+              <span>{{ section }}</span>
+            </div>
           </div>
         </fieldset>
 
@@ -75,12 +85,12 @@
           </button>
         </div>
 
-        <label class="inline-check reference-toggle">
+        <label v-if="generationMode === 'practice'" class="inline-check reference-toggle">
           <input v-model="referenceRealQuestions" :disabled="busy" type="checkbox" />
           参考真实题目的命题习惯
         </label>
 
-        <fieldset v-if="referenceRealQuestions" class="document-scope style-scope">
+        <fieldset v-if="generationMode === 'practice' && referenceRealQuestions" class="document-scope style-scope">
           <legend>真实题目参考文件（可选）</legend>
           <p>选择包含真题的文件后，AI 会总结成可复用的命题风格画像；留空时沿用最近一次画像。</p>
           <div class="scope-list">
@@ -171,7 +181,32 @@
         <div v-if="selectedPaper.warnings.length" class="banner"><strong>部分生成提示：</strong>{{ selectedPaper.warnings.join('；') }}</div>
         <section v-for="section in selectedPaper.sections" :key="section.sectionKey" class="paper-section">
           <h2>{{ section.title }}（{{ section.score }} 分）</h2><p>{{ section.instructions }}</p>
-          <article v-for="item in section.questions" :key="item.id" class="question-card"><div class="question-head"><span>#{{ item.questionOrder }}</span><span class="badge">{{ item.score }} 分</span><span class="badge">{{ typeText(item.question.type) }}</span></div><h2>{{ item.question.stem }}</h2><p v-if="questionMaterial(item.question)" class="preserve-lines">{{ questionMaterial(item.question)?.text }}</p></article>
+          <article v-for="item in section.questions" :key="item.id" class="question-card">
+            <div class="question-head">
+              <span>#{{ item.questionOrder }}</span><span class="badge">{{ item.score }} 分</span><span class="badge">{{ typeText(item.question.type) }}</span>
+            </div>
+            <h2>{{ item.question.stem }}</h2>
+            <p v-if="questionMaterial(item.question)" class="preserve-lines">{{ questionMaterial(item.question)?.text }}</p>
+            <div v-if="questionOptions(item.question).length" class="option-list paper-option-list">
+              <div v-for="option in questionOptions(item.question)" :key="option" class="option">{{ option }}</div>
+            </div>
+            <div v-if="isComposite(item.question)" class="sub-question-list">
+              <section v-for="sub in subQuestions(item.question)" :key="sub.key" class="sub-question">
+                <h3>{{ sub.stem }}</h3>
+                <div v-if="subQuestionOptions(sub).length" class="option-list paper-option-list">
+                  <div v-for="option in subQuestionOptions(sub)" :key="option" class="option">{{ option }}</div>
+                </div>
+                <div class="paper-answer">
+                  <p><strong>参考答案：</strong>{{ sub.answer || '（未提供）' }}</p>
+                  <p v-if="sub.explanation"><strong>解析：</strong>{{ sub.explanation }}</p>
+                </div>
+              </section>
+            </div>
+            <div class="paper-answer">
+              <p><strong>答案：</strong>{{ item.question.answer || '（未提供）' }}</p>
+              <p v-if="item.question.explanation"><strong>解析：</strong>{{ item.question.explanation }}</p>
+            </div>
+          </article>
         </section>
       </section>
 
@@ -248,11 +283,11 @@
                 </ul>
               </div>
 
-              <div v-if="isComposite(item)" class="sub-question-list">
+              <div v-if="isComposite(item) && group.mode !== 'exam'" class="sub-question-list">
                 <section v-for="sub in subQuestions(item)" :key="sub.key" class="sub-question">
                   <h3>{{ sub.stem }}</h3>
-                  <div v-if="sub.options?.length" class="option-list">
-                    <button v-for="option in sub.options" :key="option" type="button"
+                  <div v-if="subQuestionOptions(sub).length" class="option-list">
+                    <button v-for="option in subQuestionOptions(sub)" :key="option" type="button"
                       :class="['option', { active: subAnswerSelected(item.id, sub, option) }]"
                       @click="toggleSubOption(item.id, sub, option)">{{ option }}</button>
                   </div>
@@ -260,10 +295,22 @@
                 </section>
                 <button :disabled="busy" type="button" @click="submitComposite(item)">提交整组答案</button>
               </div>
+              <div v-if="isComposite(item) && group.mode === 'exam'" class="sub-question-list">
+                <section v-for="sub in subQuestions(item)" :key="sub.key" class="sub-question">
+                  <h3>{{ sub.stem }}</h3>
+                  <div v-if="subQuestionOptions(sub).length" class="option-list paper-option-list">
+                    <div v-for="option in subQuestionOptions(sub)" :key="option" class="option">{{ option }}</div>
+                  </div>
+                  <div class="paper-answer">
+                    <p><strong>参考答案：</strong>{{ sub.answer || '（未提供）' }}</p>
+                    <p v-if="sub.explanation"><strong>解析：</strong>{{ sub.explanation }}</p>
+                  </div>
+                </section>
+              </div>
 
-              <div v-else-if="parseOptions(item.options).length" class="option-list">
+              <div v-else-if="questionOptions(item).length" class="option-list">
                 <button
-                  v-for="option in parseOptions(item.options)"
+                  v-for="option in questionOptions(item)"
                   :key="option"
                   :class="['option', { active: isOptionSelected(item, option) }]"
                   type="button"
@@ -273,12 +320,18 @@
                 </button>
               </div>
 
-              <div v-if="!isComposite(item)" class="answer-row">
-                <textarea v-if="item.type === 'composition'" v-model="answers[item.id]" rows="8" placeholder="输入作文内容" />
-                <input v-else v-model="answers[item.id]" placeholder="填写答案，例如 A、AB、正确，或简答文本" />
-                <button :disabled="busy" type="button" @click="submit(item)">提交</button>
-                <small v-if="item.type === 'composition'">当前 {{ (answers[item.id] || '').replace(/\s/g, '').length }} 字</small>
+              <div v-if="group.mode === 'exam' && !isComposite(item)" class="paper-answer">
+                <p><strong>答案：</strong>{{ item.answer || '（未提供）' }}</p>
+                <p v-if="item.explanation"><strong>解析：</strong>{{ item.explanation }}</p>
               </div>
+              <template v-else-if="!isComposite(item)">
+                <div class="answer-row">
+                  <textarea v-if="item.type === 'composition'" v-model="answers[item.id]" rows="8" placeholder="输入作文内容" />
+                  <input v-else v-model="answers[item.id]" placeholder="填写答案，例如 A、AB、正确，或简答文本" />
+                  <button :disabled="busy" type="button" @click="submit(item)">提交</button>
+                  <small v-if="item.type === 'composition'">当前 {{ (answers[item.id] || '').replace(/\s/g, '').length }} 字</small>
+                </div>
+              </template>
 
               <div v-if="resultByQuestion[item.id]" :class="['result', resultByQuestion[item.id].isCorrect === true ? 'correct' : resultByQuestion[item.id].isCorrect === false ? 'wrong' : 'pending']">
                 <strong>{{ resultText(resultByQuestion[item.id]) }}</strong>
@@ -402,6 +455,7 @@ const chineseTypeOptions = [
   { value: "explanation", label: "字词解释" },
   { value: "language_basic", label: "语言基础" }
 ];
+const paperTemplateSections = ["语言文字运用", "现代文阅读", "文言文阅读", "古诗词鉴赏", "名篇名句默写", "写作"];
 
 const parsedDocuments = computed(() => documents.value.filter((item) => item.parseStatus === "PARSED"));
 const availableChapters = computed(() => Array.from(new Set(
@@ -543,8 +597,9 @@ function printPaper(showAnswers: boolean) {
   const paper = selectedPaper.value;
   const sections = paper.sections.map(section => `<section><h2>${escapeHtml(section.title)}（${section.score}分）</h2><p>${escapeHtml(section.instructions)}</p>${section.questions.map(item => {
     const q=item.question; const data=parsedQuestionData(q); const material=data?.material?.text?`<div class="material">${escapeHtml(data.material.text).replace(/\n/g,"<br>")}</div>`:"";
-    const subs=(data?.subQuestions||[]).map((sub,index)=>`<div><b>${item.questionOrder}.${index+1} ${escapeHtml(sub.stem)}</b>${showAnswers?`<p>参考答案：${escapeHtml(sub.answer||"")}<br>解析：${escapeHtml(sub.explanation||"")}</p>`:""}</div>`).join("");
-    return `<article><h3>${item.questionOrder}. ${escapeHtml(q.stem)} <small>（${item.score||0}分）</small></h3>${material}${subs}${showAnswers?`<p class="answer">答案：${escapeHtml(q.answer)}<br>解析：${escapeHtml(q.explanation||"")}</p>`:""}</article>`;
+    const options=questionOptions(q).map(option=>`<li>${escapeHtml(option)}</li>`).join("");
+    const subs=(data?.subQuestions||[]).map((sub,index)=>{const subOptions=subQuestionOptions(sub).map(option=>`<li>${escapeHtml(option)}</li>`).join("");return `<div><b>${item.questionOrder}.${index+1} ${escapeHtml(sub.stem)}</b>${subOptions?`<ol>${subOptions}</ol>`:""}${showAnswers?`<p>参考答案：${escapeHtml(sub.answer||"")}<br>解析：${escapeHtml(sub.explanation||"")}</p>`:""}</div>`;}).join("");
+    return `<article><h3>${item.questionOrder}. ${escapeHtml(q.stem)} <small>（${item.score||0}分）</small></h3>${material}${options?`<ol>${options}</ol>`:""}${subs}${showAnswers?`<p class="answer">答案：${escapeHtml(q.answer)}<br>解析：${escapeHtml(q.explanation||"")}</p>`:""}</article>`;
   }).join("")}</section>`).join("");
   const win=window.open("","_blank","width=960,height=720"); if(!win)return;
   win.document.write(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${escapeHtml(paper.paper.title)}</title><style>body{font-family:"Microsoft YaHei";line-height:1.7;margin:32px}header{text-align:center}article{break-inside:avoid;margin:18px 0}.material,.answer{padding:12px;background:#f5f5f5}@page{margin:16mm}</style></head><body><header><h1>${escapeHtml(paper.paper.title)}</h1><p>满分 ${paper.paper.totalScore} 分　建议用时 ${paper.paper.durationMinutes} 分钟</p></header>${sections}</body></html>`); win.document.close(); setTimeout(()=>win.print(),250);
@@ -705,7 +760,7 @@ function exportQuestions(items: Question[], title: string, showAnswers = true) {
 
 function buildPrintableQuestions(items: Question[], title: string, showAnswers: boolean) {
   const body = items.map((question, index) => {
-    const options = parseOptions(question.options).map((option) => `<li>${escapeHtml(option)}</li>`).join("");
+    const options = questionOptions(question).map((option) => `<li>${escapeHtml(option)}</li>`).join("");
     const data = parsedQuestionData(question);
     const material = data?.material?.text ? `<section class="material">${escapeHtml(data.material.text).replace(/\n/g, "<br>")}</section>` : "";
     const subs = (data?.subQuestions || []).map((sub, subIndex) => `<div class="sub"><b>${index + 1}.${subIndex + 1} ${escapeHtml(sub.stem)}</b>${sub.options?.length ? `<ol>${sub.options.map((option) => `<li>${escapeHtml(option)}</li>`).join("")}</ol>` : ""}${showAnswers ? `<p class="answer">答案：${escapeHtml(sub.answer || "")}<br>解析：${escapeHtml(sub.explanation || "")}</p>` : ""}</div>`).join("");
@@ -715,10 +770,39 @@ function buildPrintableQuestions(items: Question[], title: string, showAnswers: 
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>body{font-family:"Microsoft YaHei",sans-serif;line-height:1.7;margin:32px;color:#17211d}header{border-bottom:2px solid #0f766e}article{break-inside:avoid;border-bottom:1px solid #ddd;padding:16px 0}h2{font-size:17px}.answer{margin-top:12px;background:#f4f8f6;padding:10px}@media print{body{margin:0}.answer{break-inside:avoid}}@page{margin:16mm}</style></head><body><header><h1>${escapeHtml(title)}</h1><p>共 ${items.length} 道题</p></header>${body}</body></html>`;
 }
 
-function parseOptions(raw?: string) {
-  if (!raw) return [];
-  try { const parsed = JSON.parse(raw); return Array.isArray(parsed) ? parsed.map(String) : []; }
-  catch { return raw.split(/\n|;|；/).map((item) => item.trim()).filter(Boolean); }
+function parseOptions(raw?: unknown): string[] {
+  if (Array.isArray(raw)) return raw.map(String).map((item) => item.trim()).filter(Boolean);
+  if (raw == null) return [];
+  let value: unknown = raw;
+  for (let depth = 0; depth < 2 && typeof value === "string"; depth += 1) {
+    const text = value.trim();
+    if (!text) return [];
+    try {
+      value = JSON.parse(text) as unknown;
+      if (Array.isArray(value)) return value.map(String).map((item) => item.trim()).filter(Boolean);
+    } catch {
+      return text.split(/\n|;|；/).map((item) => item.trim()).filter(Boolean);
+    }
+  }
+  return [];
+}
+
+function questionOptions(question: Question) {
+  const options = parseOptions(question.options);
+  if (options.length) return options;
+  const answer = (question.answer || "").trim().toLowerCase();
+  const isTrueFalse = question.type === "true_false"
+    || ["正确", "错误", "对", "错", "true", "false"].includes(answer)
+    || /^判断/.test(question.stem.trim());
+  return isTrueFalse ? ["正确", "错误"] : [];
+}
+
+function subQuestionOptions(question: SubQuestion) {
+  const options = parseOptions(question.options);
+  if (options.length) return options;
+  const answer = (question.answer || "").trim().toLowerCase();
+  return question.type === "true_false" || ["正确", "错误", "对", "错", "true", "false"].includes(answer)
+    ? ["正确", "错误"] : [];
 }
 
 function toggleOption(question: Question, option: string) {

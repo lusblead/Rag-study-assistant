@@ -13,9 +13,10 @@ public record RagPromptContext(String question, List<RetrievedChunk> chunks, Lis
         this(question, chunks, Collections.emptyList());
     }
 
-    public String referencesText(){
+    public String referencesText() {
         return chunks.stream()
-                .map(chunk->"来源片段ID："+ chunk.chunkId()+"\n"+chunk.content())
+                .map(chunk -> "资料来源：" + sourceText(chunk)
+                        + "\n内容：\n" + chunk.content())
                 .collect(Collectors.joining("\n\n"));
     }
 
@@ -26,6 +27,26 @@ public record RagPromptContext(String question, List<RetrievedChunk> chunks, Lis
         return history.stream()
                 .map(message -> roleName(message.getRole()) + "：" + message.getContent())
                 .collect(Collectors.joining("\n"));
+    }
+
+    private String sourceText(RetrievedChunk chunk) {
+        String documentName = firstNonBlank(chunk.documentName(), chunk.title(), "未知文件");
+        String page = pageText(chunk.sourcePage());
+        return "《" + documentName + "》" + (page.isBlank() ? "" : "，" + page);
+    }
+
+    private String pageText(Integer sourcePage) {
+        return sourcePage == null || sourcePage <= 0 ? "" : "第 " + sourcePage + " 页";
+    }
+
+    private String firstNonBlank(String first, String second, String fallback) {
+        if (first != null && !first.isBlank()) {
+            return first;
+        }
+        if (second != null && !second.isBlank()) {
+            return second;
+        }
+        return fallback;
     }
 
     private String roleName(String role) {

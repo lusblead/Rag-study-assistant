@@ -56,7 +56,7 @@ public class PaperService {
                 generation.setDifficulty(paper.getDifficulty()); generation.setMode("exam");
                 generation.setTitle(paper.getTitle()+" - "+section.title());
                 generation.setRequirement(section.prompt()+"\n"+value(request.requirements(),"严格依据课程资料命题。"));
-                QuestionBatchDetail batch=generationService.generate(generation);
+                QuestionBatchDetail batch=generateWithRetry(generation,section);
                 BigDecimal each=section.score().divide(BigDecimal.valueOf(batch.getQuestions().size()),2,java.math.RoundingMode.HALF_UP);
                 for(Question question:batch.getQuestions()) {
                     PaperQuestion item=new PaperQuestion(); item.setPaperId(paper.getId()); item.setQuestionId(question.getId());
@@ -125,6 +125,14 @@ public class PaperService {
     private String value(String text,String fallback){return StringUtils.hasText(text)?text.trim():fallback;}
     private int clamp(int value,int min,int max){return Math.max(min,Math.min(max,value));}
     private String defaultTitle(String grade){return (StringUtils.hasText(grade)?grade:"高中")+"语文综合测试卷";}
+    private QuestionBatchDetail generateWithRetry(QuestionGenerationRequest request, TemplateSection section) {
+        RuntimeException firstFailure;
+        try { return generationService.generate(request); }
+        catch (RuntimeException ex) { firstFailure=ex; }
+        request.setRequirement(section.prompt()+"\n首次生成未通过结构校验（"+safeMessage(firstFailure)+"）。请重新生成，严格使用指定英文键名，不要把 material、subQuestions 或 requirements 改名，也不要输出 Markdown。\n"+value(request.getRequirement(),""));
+        try { return generationService.generate(request); }
+        catch (RuntimeException retryFailure) { throw new BizException(500,"重试后仍失败："+safeMessage(retryFailure)); }
+    }
     private List<TemplateSection> sections(String template){return List.of(
         new TemplateSection("language_basic","一、语言文字运用","完成下列语言文字运用题。","language_basic",4,new BigDecimal("15"),"生成4道彼此独立的语言基础题，覆盖字词、成语、病句或表达运用。"),
         new TemplateSection("modern_reading","二、现代文阅读","阅读下面的文字，完成各题。","modern_reading",1,new BigDecimal("20"),"生成1组现代文复合阅读题，questionData必须有material和至少4个subQuestions。"),

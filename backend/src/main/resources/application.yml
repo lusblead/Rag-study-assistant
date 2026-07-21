@@ -79,6 +79,11 @@ embedding:
   timeout-seconds: ${EMBEDDING_TIMEOUT_SECONDS:120}
 
 ocr:
+  thread-count: ${OCR_THREAD_COUNT:4}
+  max-image-pixels: ${OCR_MAX_IMAGE_PIXELS:12000000}
+  cache:
+    enabled: ${OCR_CACHE_ENABLED:true}
+    dir: ${OCR_CACHE_DIR:./uploads/.ocr-cache}
   tesseract:
     command: ${OCR_TESSERACT_COMMAND:tesseract}
     language: ${OCR_TESSERACT_LANGUAGE:chi_sim+eng}

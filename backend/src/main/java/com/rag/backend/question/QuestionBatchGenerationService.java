@@ -235,6 +235,7 @@ public class QuestionBatchGenerationService {
                     .append("每个 subQuestion 必须含 key、type、stem、answer、explanation、maxScore、gradingStrategy；客观小题 gradingStrategy=rule，主观小题=manual。")
                     .append("作文、翻译等主观题不得设置唯一正确结论，answerSchema 应包含 referenceAnswer、scoringPoints 或 rubric。")
                     .append("原文、诗词和出处只可来自课程片段；资料无出处时 source 留空。\n");
+            appendChineseSchemaExample(prompt, input.questionTypes());
         }
         prompt.append("仅输出 JSON 对象，不要 Markdown：{\"styleSummary\":\"参考真实题目时总结可复用命题风格，否则为空\",\"questions\":[")
                 .append("{\"type\":\"题型\",\"subject\":\"general|chinese\",\"stem\":\"题干\",\"options\":[\"A. ...\"],")
@@ -289,7 +290,8 @@ public class QuestionBatchGenerationService {
                                 Set<Long> allowedChunkIds,
                                 int index) {
         String stem = trim(item.path("stem").asText(item.path("question").asText("")));
-        String answer = trim(item.path("answer").asText(""));
+        String answer = trim(item.path("answer").asText(item.path("referenceAnswer").asText(
+                item.path("answerSchema").path("referenceAnswer").asText(""))));
         if (stem.isEmpty()) return null;
         String type = normalizeType(item.path("type").asText(""));
         if (!input.questionTypes().isEmpty() && !input.questionTypes().contains(type)) return null;
@@ -322,17 +324,12 @@ public class QuestionBatchGenerationService {
         question.setSubject(Question.SUBJECT_CHINESE.equals(input.subject())
                 || isChineseType(type) ? Question.SUBJECT_CHINESE : Question.SUBJECT_GENERAL);
         question.setGradingStrategy(defaultGradingStrategy(type));
-        JsonNode questionData = item.path("questionData");
-        if (!questionData.isObject() || questionData.isEmpty()) {
-            var data = objectMapper.createObjectNode();
-            if (item.path("material").isObject()) data.set("material", item.path("material"));
-            if (item.path("requirements").isObject()) data.set("requirements", item.path("requirements"));
-            if (item.path("subQuestions").isArray()) data.set("subQuestions", normalizeSubQuestions(item.path("subQuestions")));
-            questionData = data;
-        } else if (questionData.path("subQuestions").isArray()) {
-            ((com.fasterxml.jackson.databind.node.ObjectNode) questionData)
-                    .set("subQuestions", normalizeSubQuestions(questionData.path("subQuestions")));
-        }
+        JsonNode questionData = normalizeQuestionData(item);
+        if (isCompositeType(type) && (!questionData.path("material").isObject()
+                || !questionData.path("material").path("text").isTextual()
+                || questionData.path("material").path("text").asText().isBlank()
+                || !questionData.path("subQuestions").isArray() || questionData.path("subQuestions").isEmpty())) return null;
+        if (Question.TYPE_COMPOSITION.equals(type) && !questionData.path("requirements").isObject()) return null;
         question.setQuestionData(questionData.isEmpty() ? null : writeJson(questionData));
         question.setAnswerSchema(item.path("answerSchema").isObject() && !item.path("answerSchema").isEmpty()
                 ? writeJson(item.path("answerSchema")) : null);
@@ -374,15 +371,15 @@ public class QuestionBatchGenerationService {
             case "multi_choice", "multiple_choice", "多选", "多选题" -> Question.TYPE_MULTI_CHOICE;
             case "true_false", "truefalse", "判断", "判断题" -> Question.TYPE_TRUE_FALSE;
             case "short_answer", "short", "简答", "简答题" -> Question.TYPE_SHORT_ANSWER;
-            case "fill_blank", "填空", "默写" -> Question.TYPE_FILL_BLANK;
+            case "fill_blank", "填空", "填空题", "默写", "名句默写", "名篇名句默写" -> Question.TYPE_FILL_BLANK;
             case "composition", "作文", "作文题" -> Question.TYPE_COMPOSITION;
-            case "classical_chinese_reading", "文言文阅读" -> Question.TYPE_CLASSICAL_CHINESE_READING;
-            case "poetry_appreciation", "古诗词鉴赏" -> Question.TYPE_POETRY_APPRECIATION;
-            case "modern_reading", "现代文阅读" -> Question.TYPE_MODERN_READING;
+            case "classical_chinese_reading", "文言文", "文言文阅读", "文言文阅读题" -> Question.TYPE_CLASSICAL_CHINESE_READING;
+            case "poetry_appreciation", "诗歌鉴赏", "古诗鉴赏", "古诗词鉴赏", "古代诗歌阅读" -> Question.TYPE_POETRY_APPRECIATION;
+            case "modern_reading", "现代文", "现代文阅读", "现代文阅读题", "文学类文本阅读", "论述类文本阅读" -> Question.TYPE_MODERN_READING;
             case "translation", "翻译" -> Question.TYPE_TRANSLATION;
             case "sentence_break", "断句" -> Question.TYPE_SENTENCE_BREAK;
             case "explanation", "字词解释" -> Question.TYPE_EXPLANATION;
-            case "language_basic", "语言基础" -> Question.TYPE_LANGUAGE_BASIC;
+            case "language_basic", "语言基础", "语言基础题", "语言文字运用", "语言文字运用题" -> Question.TYPE_LANGUAGE_BASIC;
             default -> Question.TYPE_SINGLE_CHOICE;
         };
     }
@@ -437,6 +434,8 @@ public class QuestionBatchGenerationService {
         for (JsonNode item : source) {
             if (!item.isObject()) continue;
             var copy = (com.fasterxml.jackson.databind.node.ObjectNode) item.deepCopy();
+            if (!copy.hasNonNull("stem") && copy.hasNonNull("question")) copy.set("stem", copy.get("question"));
+            if (!copy.hasNonNull("answer") && copy.hasNonNull("referenceAnswer")) copy.set("answer", copy.get("referenceAnswer"));
             if (!copy.hasNonNull("key") || copy.path("key").asText().isBlank()) copy.put("key", "q" + (index + 1));
             String type = normalizeType(copy.path("type").asText("short_answer"));
             copy.put("type", type);
@@ -446,6 +445,46 @@ public class QuestionBatchGenerationService {
             index++;
         }
         return array;
+    }
+
+    private JsonNode normalizeQuestionData(JsonNode item) {
+        var data = objectMapper.createObjectNode();
+        if (item.path("questionData").isObject()) data.setAll((com.fasterxml.jackson.databind.node.ObjectNode) item.path("questionData").deepCopy());
+        JsonNode material = firstPresent(data.get("material"), item.get("material"), data.get("passage"), item.get("passage"), data.get("text"));
+        if (material != null) {
+            if (material.isTextual()) { var wrapped=objectMapper.createObjectNode(); wrapped.put("text", material.asText()); material=wrapped; }
+            if (material.isObject() && !material.has("text") && material.has("content")) ((com.fasterxml.jackson.databind.node.ObjectNode)material).set("text",material.get("content"));
+            if (material.isObject()) data.set("material",material);
+        }
+        JsonNode subs = firstPresent(data.get("subQuestions"), item.get("subQuestions"), data.get("questions"), item.get("questions"), data.get("items"));
+        if (subs != null && subs.isArray()) data.set("subQuestions",normalizeSubQuestions(subs));
+        JsonNode requirements = firstPresent(data.get("requirements"),item.get("requirements"),data.get("requirement"));
+        if (requirements != null) {
+            if (requirements.isTextual()) { var wrapped=objectMapper.createObjectNode(); wrapped.put("description",requirements.asText()); requirements=wrapped; }
+            if (requirements.isObject()) data.set("requirements",requirements);
+        }
+        return data;
+    }
+
+    private JsonNode firstPresent(JsonNode... nodes) {
+        for (JsonNode node:nodes) if (node!=null && !node.isNull() && !node.isMissingNode()) return node;
+        return null;
+    }
+
+    private void appendChineseSchemaExample(StringBuilder prompt, List<String> types) {
+        if (types.stream().anyMatch(this::isCompositeType)) {
+            prompt.append("复合阅读题必须严格使用此结构（不可改字段名）：")
+                    .append("{\"type\":\"modern_reading\",\"stem\":\"阅读下面材料，完成各题\",\"questionData\":")
+                    .append("{\"material\":{\"text\":\"完整原文\",\"author\":\"\",\"source\":\"\"},\"subQuestions\":[")
+                    .append("{\"key\":\"q1\",\"type\":\"short_answer\",\"stem\":\"小题题干\",\"answer\":\"参考答案\",\"explanation\":\"解析\",\"maxScore\":5,\"gradingStrategy\":\"manual\"}]},")
+                    .append("\"answerSchema\":{\"referenceAnswer\":\"见各小题\"}}。material 必须是对象，subQuestions 必须是非空数组。\n");
+        }
+        if (types.contains(Question.TYPE_COMPOSITION)) {
+            prompt.append("作文题 questionData 严格使用：{\"requirements\":{\"genre\":\"议论文\",\"wordCount\":800,\"mustInclude\":[]}}，answerSchema 必须含 rubric。\n");
+        }
+        if (types.contains(Question.TYPE_LANGUAGE_BASIC)) {
+            prompt.append("语言文字运用的每道题 type 必须精确为 language_basic，并提供非空 stem、answer 和 explanation。\n");
+        }
     }
 
     private boolean isChineseType(String type) {

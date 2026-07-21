@@ -1428,6 +1428,25 @@ label {
   text-align: left;
 }
 
+.paper-answer {
+  background: #f0f9f6;
+  border: 1px solid #cce8e2;
+  border-radius: 8px;
+  color: var(--text);
+  line-height: 1.65;
+  padding: 10px 12px;
+}
+
+.paper-answer p {
+  margin: 4px 0;
+}
+
+.paper-option-list .option {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
 .option.active {
   background: var(--primary-soft);
   border-color: #a8d9cf;

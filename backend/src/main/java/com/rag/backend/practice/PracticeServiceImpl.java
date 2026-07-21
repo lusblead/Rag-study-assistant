@@ -283,6 +283,7 @@ public class PracticeServiceImpl implements PracticeService {
                 chunk.getDocumentId(),
                 chunk.getTitle(),
                 chunk.getContent(),
+                chunk.getSourcePage(),
                 score
         );
     }
@@ -291,8 +292,10 @@ public class PracticeServiceImpl implements PracticeService {
         StringBuilder context = new StringBuilder();
         for (int i = 0; i < chunks.size(); i++) {
             RetrievedChunk chunk = chunks.get(i);
-            context.append("[").append(i + 1).append("] chunkId=").append(chunk.chunkId())
-                    .append(", documentId=").append(chunk.documentId()).append("\n")
+            context.append("[").append(i + 1).append("] source=")
+                    .append(chunk.documentName() == null || chunk.documentName().isBlank() ? chunk.title() : chunk.documentName())
+                    .append(chunk.sourcePage() == null ? "" : ", page=" + chunk.sourcePage())
+                    .append("\n")
                     .append(abbreviate(chunk.content(), 1600)).append("\n\n");
         }
         if (context.length() == 0) {

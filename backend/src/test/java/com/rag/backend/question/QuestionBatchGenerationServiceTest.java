@@ -160,6 +160,27 @@ class QuestionBatchGenerationServiceTest {
         assertTrue(question.getQuestionData().contains("\"gradingStrategy\":\"manual\""));
     }
 
+    @Test
+    void repairsCommonCompositeAliasesReturnedByModel() {
+        QuestionChunkMapper chunkMapper=mock(QuestionChunkMapper.class); QuestionBatchMapper batchMapper=mock(QuestionBatchMapper.class);
+        when(chunkMapper.selectForGeneration(7L,List.of())).thenReturn(List.of(chunk(1L,11L,"阅读材料")));
+        when(batchMapper.selectUsedChunkIds(7L)).thenReturn(List.of());
+        doAnswer(invocation->{invocation.getArgument(0,QuestionBatch.class).setId(66L);return 1;}).when(batchMapper).insert(any());
+        ChatClient chatClient=new ChatClient(){ public String call(String prompt){return """
+            {"questions":[{"type":"现代文阅读题","stem":"阅读并作答","passage":"完整材料文本","questions":[
+            {"question":"概括内容","referenceAnswer":"概括答案","type":"简答题"}]}]}
+            """;} public Flux<String> stream(String prompt){return Flux.empty();}};
+        QuestionBatchGenerationService service=new QuestionBatchGenerationService(chunkMapper,batchMapper,mock(QuestionMapper.class),new RecordingQuestionService(),mock(PracticeMapper.class),chatClient,new ObjectMapper());
+        QuestionGenerationRequest request=new QuestionGenerationRequest();request.setCourseId(7L);request.setCount(1);request.setSubject("chinese");request.setQuestionTypes(List.of("modern_reading"));
+
+        Question question=service.generate(request).getQuestions().getFirst();
+
+        assertEquals(Question.TYPE_MODERN_READING,question.getType());
+        assertTrue(question.getQuestionData().contains("\"material\":{\"text\":\"完整材料文本\"}"));
+        assertTrue(question.getQuestionData().contains("\"stem\":\"概括内容\""));
+        assertTrue(question.getQuestionData().contains("\"answer\":\"概括答案\""));
+    }
+
     private static KnowledgeChunk chunk(Long id, Long documentId, String content) {
         KnowledgeChunk chunk = new KnowledgeChunk();
         chunk.setId(id);

@@ -4,11 +4,21 @@ package com.rag.backend.agent.retrieval;
 public record RetrievedChunk(
         Long chunkId,
         Long documentId,
+        String documentName,
         String title,
         String content,
+        Integer sourcePage,
         Double score
 ) {
+    public RetrievedChunk(Long chunkId, Long documentId, String title, String content, Double score) {
+        this(chunkId, documentId, title, title, content, null, score);
+    }
+
+    public RetrievedChunk(Long chunkId, Long documentId, String title, String content, Integer sourcePage, Double score) {
+        this(chunkId, documentId, title, title, content, sourcePage, score);
+    }
+
     public RetrievedChunk withScore(Double newScore) {
-        return new RetrievedChunk(chunkId, documentId, title, content, newScore);
+        return new RetrievedChunk(chunkId, documentId, documentName, title, content, sourcePage, newScore);
     }
 }
