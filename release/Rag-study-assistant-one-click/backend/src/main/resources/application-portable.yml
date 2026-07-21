@@ -1,0 +1,41 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  datasource:
+    driver-class-name: org.h2.Driver
+    url: ${SPRING_DATASOURCE_URL:jdbc:h2:file:./data/rag-study-assistant;MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE}
+    username: ${SPRING_DATASOURCE_USERNAME:sa}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
+
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:db/schema-h2.sql
+      continue-on-error: true
+
+app:
+  upload:
+    dir: ${APP_UPLOAD_DIR:./data/uploads}
+
+vector:
+  provider: ${VECTOR_PROVIDER:local}
+
+milvus:
+  embedding-dimension: ${EMBEDDING_DIMENSION:1024}
+
+agent:
+  mock: ${AGENT_MOCK:false}
+
+llm:
+  provider: ${LLM_PROVIDER:local}
+  base-url: ${LLM_BASE_URL:https://api.deepseek.com}
+  model: ${LLM_MODEL:deepseek-v4-pro}
+
+embedding:
+  provider: ${EMBEDDING_PROVIDER:local}
+  base-url: ${EMBEDDING_BASE_URL:https://api.siliconflow.cn/v1}
+  model: ${EMBEDDING_MODEL:BAAI/bge-m3}
+
+rerank:
+  provider: ${RERANK_PROVIDER:local}
