@@ -1,0 +1,37 @@
+package com.rag.backend.question;
+
+import com.rag.backend.question.model.Question;
+
+import java.util.List;
+
+public interface QuestionService {
+
+    /**
+     * 保存单个题目
+     */
+    Question save(Question question);
+    default Question update(Long id, Question question) {
+        throw new UnsupportedOperationException("Update is not implemented");
+    }
+
+    /**
+     * 批量保存题目（供同学C的AI出题模块调用）
+     */
+    List<Question> batchSave(List<Question> questions);
+
+    /**
+     * 根据课程ID查询题目列表，支持按题型和难度筛选
+     * @param courseId   课程ID（必填）
+     * @param type       题型筛选（可选）
+     * @param difficulty 难度筛选（可选）
+     */
+    List<Question> listByCourse(Long courseId, String type, String difficulty);
+
+    default List<Question> listByCourse(Long courseId, String type, String difficulty, String subject) {
+        return listByCourse(courseId, type, difficulty);
+    }
+
+    default void delete(Long id) {
+        throw new UnsupportedOperationException("Delete is not implemented");
+    }
+}

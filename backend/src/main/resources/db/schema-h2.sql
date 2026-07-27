@@ -1,0 +1,182 @@
+CREATE TABLE IF NOT EXISTS courses (
+    id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+    name        VARCHAR(100) NOT NULL,
+    description VARCHAR(500),
+    term        VARCHAR(50),
+    created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS documents (
+    id           BIGINT AUTO_INCREMENT PRIMARY KEY,
+    course_id    BIGINT       NOT NULL,
+    filename     VARCHAR(255) NOT NULL,
+    file_type    VARCHAR(50)  NOT NULL,
+    file_path    VARCHAR(1000) NOT NULL,
+    parse_status VARCHAR(20)  NOT NULL DEFAULT 'UPLOADED',
+    chunk_count  INT          NOT NULL DEFAULT 0,
+    created_at   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_documents_course ON documents(course_id);
+
+CREATE TABLE IF NOT EXISTS knowledge_chunks (
+    id               BIGINT AUTO_INCREMENT PRIMARY KEY,
+    course_id        BIGINT       NOT NULL,
+    document_id      BIGINT       NOT NULL,
+    chunk_index      INT          NOT NULL,
+    title            VARCHAR(255),
+    content          CLOB         NOT NULL,
+    source_page      INT,
+    token_count      INT,
+    milvus_vector_id VARCHAR(100),
+    embedding_status VARCHAR(50)  DEFAULT 'PENDING',
+    created_at       TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_chunks_course ON knowledge_chunks(course_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_document ON knowledge_chunks(document_id);
+
+CREATE TABLE IF NOT EXISTS question_batches (
+    id                       BIGINT AUTO_INCREMENT PRIMARY KEY,
+    course_id                BIGINT       NOT NULL,
+    title                    VARCHAR(255) NOT NULL,
+    mode                     VARCHAR(20)  NOT NULL DEFAULT 'practice',
+    requirement              CLOB,
+    question_count           INT          NOT NULL DEFAULT 0,
+    question_type            VARCHAR(64),
+    difficulty               VARCHAR(10),
+    reference_real_questions BOOLEAN      NOT NULL DEFAULT FALSE,
+    style_summary            CLOB,
+    created_at               TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_question_batches_course ON question_batches(course_id);
+
+CREATE TABLE IF NOT EXISTS question_batch_documents (
+    batch_id BIGINT NOT NULL,
+    document_id BIGINT NOT NULL,
+    PRIMARY KEY (batch_id, document_id)
+);
+
+CREATE TABLE IF NOT EXISTS question_batch_chunks (
+    batch_id BIGINT NOT NULL,
+    chunk_id BIGINT NOT NULL,
+    PRIMARY KEY (batch_id, chunk_id)
+);
+
+CREATE TABLE IF NOT EXISTS questions (
+    id              BIGINT AUTO_INCREMENT PRIMARY KEY,
+    course_id       BIGINT        NOT NULL,
+    source_chunk_id BIGINT,
+    batch_id        BIGINT,
+    type            VARCHAR(64)   NOT NULL,
+    stem            CLOB          NOT NULL,
+    options         CLOB,
+    answer          VARCHAR(500)  NOT NULL,
+    explanation     CLOB,
+    difficulty      VARCHAR(10),
+    knowledge_point VARCHAR(255),
+    chapter_tags    CLOB,
+    question_data   CLOB,
+    answer_schema   CLOB,
+    subject         VARCHAR(32) DEFAULT 'general' NOT NULL,
+    grading_strategy VARCHAR(32) DEFAULT 'rule' NOT NULL,
+    created_at      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_questions_course ON questions(course_id);
+CREATE INDEX IF NOT EXISTS idx_questions_batch ON questions(batch_id);
+CREATE INDEX IF NOT EXISTS idx_questions_type ON questions(type);
+CREATE INDEX IF NOT EXISTS idx_questions_subject ON questions(subject);
+CREATE INDEX IF NOT EXISTS idx_questions_difficulty ON questions(difficulty);
+
+CREATE TABLE IF NOT EXISTS practice_records (
+    id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+    course_id   BIGINT       NOT NULL,
+    question_id BIGINT       NOT NULL,
+    user_answer VARCHAR(500),
+    is_correct  BOOLEAN,
+    grading_mode VARCHAR(40),
+    grading_feedback CLOB,
+    answer_payload CLOB,
+    score DECIMAL(7,2),
+    max_score DECIMAL(7,2),
+    grading_status VARCHAR(32) DEFAULT 'graded' NOT NULL,
+    created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+ALTER TABLE practice_records ADD COLUMN IF NOT EXISTS grading_mode VARCHAR(40);
+ALTER TABLE practice_records ADD COLUMN IF NOT EXISTS grading_feedback CLOB;
+ALTER TABLE practice_records ADD COLUMN IF NOT EXISTS answer_payload CLOB;
+ALTER TABLE practice_records ADD COLUMN IF NOT EXISTS score DECIMAL(7,2);
+ALTER TABLE practice_records ADD COLUMN IF NOT EXISTS max_score DECIMAL(7,2);
+ALTER TABLE practice_records ADD COLUMN IF NOT EXISTS grading_status VARCHAR(32) DEFAULT 'graded' NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_practice_course ON practice_records(course_id);
+CREATE INDEX IF NOT EXISTS idx_practice_question ON practice_records(question_id);
+
+CREATE TABLE IF NOT EXISTS chat_sessions (
+    id         BIGINT AUTO_INCREMENT PRIMARY KEY,
+    course_id  BIGINT       NOT NULL,
+    title      VARCHAR(100),
+    created_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_course ON chat_sessions(course_id);
+
+CREATE TABLE IF NOT EXISTS agent_model_settings (
+    id                 BIGINT PRIMARY KEY,
+    llm_provider       VARCHAR(80)  NOT NULL,
+    llm_base_url       VARCHAR(500) NOT NULL,
+    llm_model          VARCHAR(200) NOT NULL,
+    llm_api_key        CLOB,
+    embedding_provider VARCHAR(80)  NOT NULL,
+    embedding_base_url VARCHAR(500) NOT NULL,
+    embedding_model    VARCHAR(200) NOT NULL,
+    embedding_api_key  CLOB,
+    created_at         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS rerank_runtime_settings (
+    id         BIGINT PRIMARY KEY,
+    provider   VARCHAR(40)  NOT NULL,
+    base_url   VARCHAR(500) NOT NULL,
+    model      VARCHAR(200) NOT NULL,
+    api_key    CLOB,
+    fail_open  BOOLEAN      NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id         BIGINT AUTO_INCREMENT PRIMARY KEY,
+    session_id BIGINT      NOT NULL,
+    role       VARCHAR(20) NOT NULL,
+    content    CLOB        NOT NULL,
+    created_at TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id);
+
+CREATE TABLE IF NOT EXISTS papers (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, course_id BIGINT NOT NULL,
+    subject VARCHAR(32) NOT NULL DEFAULT 'chinese', title VARCHAR(255) NOT NULL,
+    paper_type VARCHAR(64), grade_level VARCHAR(64), difficulty VARCHAR(32),
+    duration_minutes INT, total_score DECIMAL(7,2), template_code VARCHAR(128),
+    requirements CLOB, warnings CLOB,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS paper_questions (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, paper_id BIGINT NOT NULL,
+    question_id BIGINT NOT NULL, section_key VARCHAR(128) NOT NULL,
+    section_title VARCHAR(255) NOT NULL, section_instructions VARCHAR(500),
+    question_order INT NOT NULL, score DECIMAL(7,2),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (paper_id, question_id)
+);

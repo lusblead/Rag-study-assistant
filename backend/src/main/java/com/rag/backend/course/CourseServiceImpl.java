@@ -1,0 +1,115 @@
+package com.rag.backend.course;
+
+import com.rag.backend.agent.ingest.AgentDocumentCleanupService;
+import com.rag.backend.agent.history.ChatHistoryService;
+import com.rag.backend.common.BizException;
+import com.rag.backend.course.model.Course;
+import com.rag.backend.document.DocumentMapper;
+import com.rag.backend.document.model.CourseDocument;
+import com.rag.backend.practice.PracticeMapper;
+import com.rag.backend.paper.PaperMapper;
+import com.rag.backend.paper.PaperQuestionMapper;
+import com.rag.backend.question.QuestionMapper;
+import com.rag.backend.question.QuestionBatchMapper;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+
+@Service
+public class CourseServiceImpl implements CourseService {
+
+    private final CourseMapper courseMapper;
+    private final DocumentMapper documentMapper;
+    private final QuestionMapper questionMapper;
+    private final QuestionBatchMapper questionBatchMapper;
+    private final PracticeMapper practiceMapper;
+    private final AgentDocumentCleanupService cleanupService;
+    private final ChatHistoryService chatHistoryService;
+    private final PaperMapper paperMapper;
+    private final PaperQuestionMapper paperQuestionMapper;
+
+    public CourseServiceImpl(CourseMapper courseMapper,
+                             DocumentMapper documentMapper,
+                             QuestionMapper questionMapper,
+                             QuestionBatchMapper questionBatchMapper,
+                             PracticeMapper practiceMapper,
+                             AgentDocumentCleanupService cleanupService,
+                             ChatHistoryService chatHistoryService,
+                             PaperMapper paperMapper,
+                             PaperQuestionMapper paperQuestionMapper) {
+        this.courseMapper = courseMapper;
+        this.documentMapper = documentMapper;
+        this.questionMapper = questionMapper;
+        this.questionBatchMapper = questionBatchMapper;
+        this.practiceMapper = practiceMapper;
+        this.cleanupService = cleanupService;
+        this.chatHistoryService = chatHistoryService;
+        this.paperMapper = paperMapper;
+        this.paperQuestionMapper = paperQuestionMapper;
+    }
+
+    @Override
+    public Course create(Course course) {
+        courseMapper.insert(course);
+        return course;
+    }
+
+    @Override
+    public List<Course> list(String name) {
+        return courseMapper.selectList(StringUtils.hasText(name) ? name : null);
+    }
+
+    @Override
+    public Course update(Long id, Course course) {
+        Course existing = courseMapper.selectById(id);
+        if (existing == null) {
+            return null;
+        }
+        course.setId(id);
+        courseMapper.update(course);
+        return courseMapper.selectById(id);
+    }
+
+    @Override
+    @Transactional
+    public void delete(Long id) {
+        Course existing = courseMapper.selectById(id);
+        if (existing == null) {
+            throw new BizException(404, "课程不存在: " + id);
+        }
+
+        List<CourseDocument> documents = documentMapper.selectListByCourseId(id);
+        for (CourseDocument document : documents) {
+            cleanupService.cleanupDocument(document.getId());
+            deleteUploadedFile(document);
+        }
+
+        cleanupService.cleanupCourse(id);
+        chatHistoryService.deleteByCourseId(id);
+        practiceMapper.deleteByCourseId(id);
+        paperQuestionMapper.deleteByCourseId(id);
+        paperMapper.deleteByCourseId(id);
+        questionMapper.deleteByCourseId(id);
+        questionBatchMapper.deleteDocumentsByCourseId(id);
+        questionBatchMapper.deleteChunksByCourseId(id);
+        questionBatchMapper.deleteByCourseId(id);
+        documentMapper.deleteByCourseId(id);
+        courseMapper.deleteById(id);
+    }
+
+    private void deleteUploadedFile(CourseDocument document) {
+        if (document.getFilePath() == null || document.getFilePath().isBlank()) {
+            return;
+        }
+        try {
+            Files.deleteIfExists(Path.of(document.getFilePath()));
+        } catch (IOException e) {
+            throw new BizException(500, "删除课程文件失败: " + document.getFilePath());
+        }
+    }
+}
