@@ -73,8 +73,6 @@ public class Question {
     public static final String DIFF_MEDIUM = "medium";
     public static final String DIFF_HARD   = "hard";
 
-    // -- getters / setters ----------------------------------------
-
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
 

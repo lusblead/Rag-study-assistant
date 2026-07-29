@@ -30,8 +30,6 @@ public class Result<T> {
         return fail(500, message);
     }
 
-    // -- getters -------------------------------------------------
-
     public int getCode() { return code; }
     public void setCode(int code) { this.code = code; }
 

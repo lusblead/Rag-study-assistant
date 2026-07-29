@@ -15,7 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Component
-// 解析 pptx 演示文稿中的文本。
+// 逐页提取 PPTX 文本形状并保留页码；图片、图表内文字和 OCR 不在当前解析范围。
 public class PptxDocumentParser implements DocumentParser {
     @Override
     public boolean supports(String fileType) {

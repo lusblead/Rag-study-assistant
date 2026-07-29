@@ -12,7 +12,7 @@ import java.nio.file.Path;
 import java.util.Collections;
 
 @Component
-// 解析 docx 文档中的段落和表格文本。
+// 通过 POI XWPF 提取 DOCX 文本；空文档直接失败，成功时作为一个无页码 PageText 返回。
 public class DocxDocumentParser implements DocumentParser {
     @Override
     public boolean supports(String fileType) {

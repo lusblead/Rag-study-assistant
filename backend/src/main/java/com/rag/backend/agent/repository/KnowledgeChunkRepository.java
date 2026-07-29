@@ -3,7 +3,7 @@ import com.rag.backend.agent.model.KnowledgeChunk;
 
 import java.util.List;
 
-// 定义知识片段持久化仓储接口。
+// 持久化知识片段元数据和外部向量 ID/状态；实际向量内容由 VectorStoreService 管理。
 public interface KnowledgeChunkRepository {
     KnowledgeChunk save(KnowledgeChunk chunk);
 

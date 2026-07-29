@@ -56,7 +56,7 @@ rerank:
     lexical-weight: ${RERANK_LOCAL_LEXICAL_WEIGHT:0.3}
 
 agent:
-  # false = use MilvusVectorStoreService + LocalHashEmbeddingClient + LocalChatClient by default.
+  # false 使用配置的生产型 Provider；默认装配 Milvus 与 OpenAI-compatible Embedding/Chat 客户端。
   # true  = use pure in-memory mocks for quick backend-only debugging.
   mock: ${AGENT_MOCK:false}
 

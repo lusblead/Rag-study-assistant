@@ -33,8 +33,6 @@ public class KnowledgeChunk {
     public static final String STATUS_DONE    = "DONE";
     public static final String STATUS_FAILED  = "FAILED";
 
-    // -- getters / setters -------------------------------------------
-
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
 

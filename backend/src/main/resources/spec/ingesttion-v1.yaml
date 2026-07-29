@@ -1,0 +1,65 @@
+# 把状态迁移、可见性和错误策略写成可执行契约。
+# 契约版本决定兼容/回放语义，不能静默改旧版本。
+specVersion: ingestion-v1
+aggregates:
+  documentLifecycle: [ACTIVE, DELETING, DELETED]
+  documentVersionState:
+    [UPLOADED, BUILDING, PARSING, CHUNKING, EMBEDDING, INDEXING,
+     VERIFYING, READY, ACTIVE, INCONSISTENT, REPAIRING,
+     SUPERSEDED, FAILED, CANCELLED]
+  ingestJobState: [QUEUED, RUNNING, RETRY_WAIT, SUCCEEDED, FAILED, CANCELLED]
+  ingestStepState: [PENDING, RUNNING, DONE, FAILED]
+
+# identity：声明去重和关联的稳定业务键。
+identity:
+  dedupeKey: [documentId, contentHash, pipelineFingerprint]
+  chunkKey: [documentVersionId, chunkBusinessKey]
+
+# visibility：明确哪些状态可在线检索。
+visibility:
+  readableStates: [ACTIVE]
+  rule: documents.active_version_id must equal document_versions.id
+
+# stateOwnership：同名 FAILED 也属于不同聚合，必须连同聚合类型解释。
+stateOwnership:
+  retryWaitBelongsTo: IngestJob
+  leaseBelongsTo: IngestJob ownership fields
+  deletingBelongsTo: DocumentLifecycle
+  onlineVisibilityDependsOn: DocumentLifecycle.ACTIVE and DocumentVersionState.ACTIVE
+
+# invariants：数据库约束与 Harness 逐条给证据。
+invariants:
+  - id: INV-1
+    statement: BUILDING or FAILED versions are never returned by online retrieval.
+  - id: INV-2
+    statement: Replaying the same step does not increase logical chunk/vector count.
+  - id: INV-3
+    statement: A failed rebuild never changes the previous active version.
+
+# errorPolicy：按错误码重试，不解析文案。
+errorPolicy:
+  UNSUPPORTED_FORMAT: {retryable: false}
+  SOURCE_CORRUPTED: {retryable: false}
+  PARSER_TIMEOUT: {retryable: true, maxAttempts: 3}
+  EMBED_RATE_LIMITED: {retryable: true, maxAttempts: 5}
+  EMBED_INVALID_REQUEST: {retryable: false}
+  EMBED_DIMENSION_MISMATCH: {retryable: false}
+  VECTOR_TRANSIENT: {retryable: true, maxAttempts: 5}
+  VECTOR_WRITE_UNKNOWN: {retryable: true, strategy: query-or-idempotent-upsert}
+  VECTOR_SCHEMA_MISMATCH: {retryable: false}
+  VERIFY_COUNT_MISMATCH: {retryable: false, nextVersionState: INCONSISTENT}
+  ACTIVE_VERSION_MISMATCH: {retryable: false, repair: reconcile}
+  STEP_INPUT_MISMATCH: {retryable: false}
+  LEASE_LOST: {retryable: true, commitAllowed: false}
+
+# 阶段契约用输入/输出摘要保证重放完整性。
+stageContract:
+  requiredInput:
+    - documentVersionId
+    - contentHash
+    - pipelineFingerprint
+  requiredOutput:
+    - state
+    - outputDigest
+    - processedCount
+    - stableErrorCode

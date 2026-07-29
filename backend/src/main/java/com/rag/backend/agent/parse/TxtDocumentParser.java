@@ -10,7 +10,7 @@ import java.nio.file.Path;
 import java.util.Collections;
 
 @Component
-// 解析 txt 纯文本文件内容。
+// 使用统一文本编码探测读取 TXT，并把整份文件作为一个无页码 PageText；I/O 失败转为解析异常。
 public class TxtDocumentParser implements DocumentParser {
     @Override
     public boolean supports(String fileType) {

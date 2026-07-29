@@ -28,8 +28,6 @@ public class CourseDocument {
     public static final String STATUS_PARSED  = "PARSED";
     public static final String STATUS_FAILED  = "FAILED";
 
-    // -- getters / setters ----------------------------------------
-
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
 

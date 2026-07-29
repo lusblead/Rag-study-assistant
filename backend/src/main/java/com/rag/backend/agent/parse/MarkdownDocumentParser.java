@@ -10,7 +10,7 @@ import java.nio.file.Path;
 import java.util.Collections;
 
 @Component
-// 解析 Markdown 文档内容。
+// 使用统一文本编码探测读取 Markdown，并保留原始标记作为一个无页码 PageText，不在此处渲染 HTML。
 public class MarkdownDocumentParser implements DocumentParser {
     @Override
     public boolean supports(String fileType) {

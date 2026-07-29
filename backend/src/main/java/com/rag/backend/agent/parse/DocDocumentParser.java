@@ -12,7 +12,7 @@ import java.nio.file.Path;
 import java.util.Collections;
 
 @Component
-// 解析旧版 Word doc 文档中的文本。
+// 通过 POI HWPF 提取旧版 DOC 文本；空文档直接失败，成功时作为一个无页码 PageText 返回。
 public class DocDocumentParser implements DocumentParser {
     @Override
     public boolean supports(String fileType) {

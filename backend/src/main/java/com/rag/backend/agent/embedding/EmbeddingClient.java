@@ -2,7 +2,7 @@ package com.rag.backend.agent.embedding;
 
 import java.util.List;
 
-// 定义文本向量化客户端的统一接口。
+// 将一段文本转换为单个向量；Provider 选择和本地/远程失败策略由实现类处理。
 public interface EmbeddingClient {
     List<Double> embed(String text);
 }
