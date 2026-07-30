@@ -106,3 +106,12 @@ CREATE TABLE outbox_events (
     -- 访问索引：轮询/对账避免全表扫描。
                                INDEX idx_outbox_poll (status, available_at, claim_until)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- chunk 协议：versionId 与 businessKey 唯一，重放回读同一行再继续向量写入。
+ALTER TABLE knowledge_chunks
+    ADD COLUMN vector_business_id BIGINT NULL,
+    ADD COLUMN embedding_model VARCHAR(200) NULL,
+    ADD COLUMN embedding_dimension INT NULL,
+    -- 失败码用于重试决策和对账，不能只写 FAILED 而丢失原因。
+    ADD COLUMN embedding_error_code VARCHAR(64) NULL,
+    ADD UNIQUE KEY uk_vector_business_id (vector_business_id);

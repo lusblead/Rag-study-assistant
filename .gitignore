@@ -22,7 +22,9 @@ logs/
 .DS_Store
 Thumbs.db
 
-backend/docs/Agent进阶教程/
+backend/docs/
+.agents/
+.agent/
 .cache/
 mysql_data/
 milvus_data/

@@ -33,6 +33,11 @@ milvus:
   collection-name: ${MILVUS_COLLECTION:knowledge_chunk_vectors_bge_m3}
   embedding-dimension: ${EMBEDDING_DIMENSION:1024}
 
+# 方案三第 07 章：新 collection，主键为应用计算的确定性 vectorId。
+ingestion:
+  milvus:
+    collection-name: ${INGESTION_MILVUS_COLLECTION:knowledge_chunk_vectors_ingestion_v2}
+
 vector:
   provider: ${VECTOR_PROVIDER:milvus}
 
