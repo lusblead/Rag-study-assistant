@@ -1,0 +1,21 @@
+{"chunkId":1001,"documentId":201,"documentVersionId":101,"title":"牛顿运动定律","content":"牛顿第二定律：物体的加速度与合外力成正比，与质量成反比，公式为 F=ma。","active":true}
+{"chunkId":1002,"documentId":202,"documentVersionId":101,"title":"光合作用","content":"光合作用：绿色植物利用光能，把二氧化碳和水合成有机物并释放氧气。","active":true}
+{"chunkId":1003,"documentId":203,"documentVersionId":101,"title":"二分查找","content":"二分查找：在有序数组中比较中间元素，每次排除一半搜索区间，时间复杂度为 O(log n)。","active":true}
+{"chunkId":1004,"documentId":204,"documentVersionId":101,"title":"TCP 连接建立","content":"TCP 三次握手依次交换 SYN、SYN-ACK 和 ACK，用来确认双方的发送与接收能力。","active":true}
+{"chunkId":1005,"documentId":205,"documentVersionId":101,"title":"数据库事务","content":"ACID 包括原子性、一致性、隔离性和持久性，是数据库事务可靠执行的四项性质。","active":true}
+{"chunkId":1006,"documentId":206,"documentVersionId":101,"title":"向量相似度","content":"余弦相似度通过两个向量夹角的余弦值衡量方向接近程度，对向量长度不敏感。","active":true}
+{"chunkId":1007,"documentId":207,"documentVersionId":101,"title":"Java 垃圾回收","content":"Java 垃圾回收器从可达性根节点出发识别仍被引用的对象，再回收不可达对象。","active":true}
+{"chunkId":1008,"documentId":208,"documentVersionId":101,"title":"Spring 事务代理","content":"Spring 声明式事务通常通过代理拦截方法调用；同类内部调用可能绕过代理而不生效。","active":true}
+{"chunkId":1009,"documentId":209,"documentVersionId":101,"title":"RAG 基本链路","content":"RAG 先检索相关资料，再把检索结果作为上下文交给大模型生成有依据的回答。","active":true}
+{"chunkId":1010,"documentId":210,"documentVersionId":101,"title":"Milvus 向量库","content":"Milvus 用 collection 保存向量及标量元数据，可以在向量搜索时下推课程和版本过滤条件。","active":true}
+{"chunkId":1011,"documentId":211,"documentVersionId":101,"title":"幂等请求","content":"幂等键把多次重复请求映射到同一个业务命令，服务端回放原结果而不是再次产生副作用。","active":true}
+{"chunkId":1012,"documentId":212,"documentVersionId":101,"title":"任务租约","content":"数据库 Lease 通过 owner、过期时间和版本号授予临时执行权，旧执行者失去租约后不能提交。","active":true}
+{"chunkId":1013,"documentId":213,"documentVersionId":101,"title":"事务消息表","content":"Transactional Outbox 把业务数据和待发布事件放在同一数据库事务中，提交后由派发器可靠重试。","active":true}
+{"chunkId":1014,"documentId":214,"documentVersionId":101,"title":"BM25 词法检索","content":"BM25 根据词频、逆文档频率和文档长度计算关键词相关性，适合精确术语检索。","active":true}
+{"chunkId":1015,"documentId":215,"documentVersionId":101,"title":"注意力机制","content":"自注意力机制根据 Query 与 Key 的相关性聚合 Value，使序列位置能够直接交换信息。","active":true}
+{"chunkId":1016,"documentId":216,"documentVersionId":101,"title":"细胞呼吸","content":"细胞呼吸分解有机物并释放能量，有氧呼吸通常消耗氧气并产生二氧化碳和水。","active":true}
+{"chunkId":1017,"documentId":217,"documentVersionId":101,"title":"牛顿第一定律","content":"牛顿第一定律说明物体在不受合外力时保持静止或匀速直线运动状态。","active":true}
+{"chunkId":1018,"documentId":218,"documentVersionId":101,"title":"向量维度契约","content":"Embedding 维度变化会破坏既有向量集合的 schema，必须使用匹配维度的新集合并重新索引。","active":true}
+{"chunkId":1019,"documentId":219,"documentVersionId":101,"title":"OCR 质量控制","content":"OCR 处理扫描件时应记录页级质量、置信度和失败页，低质量结果不能直接进入在线索引。","active":true}
+{"chunkId":1020,"documentId":220,"documentVersionId":101,"title":"文档切片重叠","content":"Chunk overlap 在相邻文档切片之间保留一段重复上下文，减少答案跨边界时的信息丢失。","active":true}
+{"chunkId":9901,"documentId":299,"documentVersionId":99,"title":"旧版删除规则","content":"旧版本专属删除规则：删除任务必须直接物理删除所有在线数据。","active":false}

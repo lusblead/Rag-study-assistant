@@ -10,6 +10,10 @@ $ErrorActionPreference = "Stop"
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path
 $composeFile = Join-Path $projectRoot "backend\evals\docker-compose.public-eval.yml"
 $mysqlWasRunning = [bool](docker ps --filter "name=^/rag-study-mysql$" --format "{{.Names}}")
+$resolvedDatasetDir = Join-Path $projectRoot $DatasetDir
+if (-not (Test-Path -LiteralPath (Join-Path $resolvedDatasetDir "corpus.jsonl"))) {
+    throw "Public T2 数据集不存在: $resolvedDatasetDir。请先运行 prepare_t2_subset.py 生成 corpus/cases。"
+}
 
 Push-Location $projectRoot
 try {
@@ -89,7 +93,10 @@ try {
     })
     $sha256.Dispose()
 
-    $env:JAVA_HOME = "C:\Program Files\Java\jdk-25"
+    # 优先使用当前会话 JAVA_HOME；缺失时给出清晰错误，不硬编码本机路径。
+    if ([string]::IsNullOrWhiteSpace($env:JAVA_HOME)) {
+        throw "未设置 JAVA_HOME。请先设置 JAVA_HOME 指向 JDK 21+ 安装目录后再运行。"
+    }
     $env:Path = "$env:JAVA_HOME\bin;$env:Path"
     $mavenArgs = @(
         "-pl", "backend",

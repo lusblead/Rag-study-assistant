@@ -1,0 +1,11 @@
+{
+  "fixtureId": "retrieval-smoke-v1",
+  "schemaVersion": 1,
+  "corpusSha256": "ba5b807a97738b4f6138d9b7b266f36afc76c8319f32d83a305bdd15bcbc18b2",
+  "caseSha256": "ab0717919f053af3ccadafa22f620b461d0ee3f7d807132cea601078b899f08f",
+  "embeddingDimension": 64,
+  "metric": "recall@1/3/5/10,mrr,ndcg@10,sourceCoverage,evidenceGroupCoverage,unanswerablePrecision",
+  "expectedCaseCount": 8,
+  "expectedChunkCount": 12,
+  "source": "self-authored synthetic technical fiction, no external text copied"
+}

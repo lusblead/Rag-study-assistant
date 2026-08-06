@@ -1,0 +1,12 @@
+{"caseId":"S01","query":"牛顿第二定律","relevantChunkIds":[1001],"answerability":"ANSWERABLE","tags":["exact-term","physics"]}
+{"caseId":"S02","query":"光合作用","relevantChunkIds":[1002],"answerability":"ANSWERABLE","tags":["exact-term","biology"]}
+{"caseId":"S03","query":"二分查找","relevantChunkIds":[1003],"answerability":"ANSWERABLE","tags":["exact-term","computer-science"]}
+{"caseId":"S04","query":"TCP 三次握手","relevantChunkIds":[1004],"answerability":"ANSWERABLE","tags":["exact-term","network"]}
+{"caseId":"S05","query":"ACID","relevantChunkIds":[1005],"answerability":"ANSWERABLE","tags":["exact-term","database"]}
+{"caseId":"S06","query":"余弦相似度","relevantChunkIds":[1006],"answerability":"ANSWERABLE","tags":["exact-term","retrieval"]}
+{"caseId":"S07","query":"数据库怎样保证重复请求只执行一次","relevantChunkIds":[1011],"answerability":"ANSWERABLE","tags":["paraphrase","reliability"]}
+{"caseId":"S08","query":"消息如何避免事务提交后丢失","relevantChunkIds":[1013],"answerability":"ANSWERABLE","tags":["paraphrase","reliability"]}
+{"caseId":"S09","query":"文档切片为什么要重叠","relevantChunkIds":[1020],"answerability":"ANSWERABLE","tags":["paraphrase","rag"]}
+{"caseId":"S10","query":"向量长度改了为什么不能写入旧集合","relevantChunkIds":[1018],"answerability":"ANSWERABLE","tags":["paraphrase","vector-schema"]}
+{"caseId":"S11","query":"量子纠缠的贝尔不等式","relevantChunkIds":[],"answerability":"UNANSWERABLE","tags":["no-answer","out-of-domain"]}
+{"caseId":"S12","query":"旧版本专属删除规则","relevantChunkIds":[],"answerability":"UNANSWERABLE","tags":["no-answer","stale-version"]}

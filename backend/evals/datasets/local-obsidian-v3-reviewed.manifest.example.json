@@ -1,0 +1,16 @@
+{
+  "datasetId": "local-obsidian-v3-reviewed",
+  "schemaVersion": 1,
+  "corpusSha256": "<replace-with-corpus.jsonl-sha256>",
+  "retrievalCaseFile": "standard_reviewed_100_retrieval.jsonl",
+  "retrievalCaseSha256": "<replace-with-retrieval-case-sha256>",
+  "expectedChunkCount": 4015,
+  "expectedCaseCount": 100,
+  "splitCounts": {
+    "dev": 45,
+    "test": 55
+  },
+  "reviewStatus": "reviewed-by-chatgpt",
+  "localMountPath": "D:\\EvalDatasets\\local-obsidian-v3-reviewed",
+  "notCommittedReason": "私有 Obsidian 语料，含个人笔记与隐私内容；通过 Manifest/Checksum 挂载保证可复现性。"
+}

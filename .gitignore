@@ -37,11 +37,14 @@ etcd_data/
 uploads_data/
 
 # 评测数据、运行产物与本地生成物不进入版本库
-backend/evals/datasets/
+backend/evals/datasets/*
+!backend/evals/datasets/README.md
+!backend/evals/datasets/*.example.json
+!backend/evals/datasets/rag-retrieval-smoke-v1/
 backend/evals/runs/
 backend/evals/reports/
-backend/evals/README.md
-eval/
+# 仅忽略仓库根目录的旧 eval 数据目录；允许 backend/src/test/.../eval 下的评测 Java 类入库。
+/eval/
 docs/
 *.zip
 __pycache__/

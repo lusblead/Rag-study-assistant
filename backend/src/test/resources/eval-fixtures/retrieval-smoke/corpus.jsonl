@@ -1,0 +1,12 @@
+{"chunkId": 1, "documentId": 101, "title": "网关默认超时", "content": "虚构网关默认请求超时时间为 3 秒。超过 3 秒未收到上游响应时，网关返回 504 并记录超时指标。", "sourceDocument": "虚构网关部署手册.md"}
+{"chunkId": 2, "documentId": 101, "title": "网关重试", "content": "虚构网关对幂等请求最多重试 2 次，重试间隔依次为 500 毫秒和 1000 毫秒。非幂等请求不自动重试。", "sourceDocument": "虚构网关部署手册.md"}
+{"chunkId": 3, "documentId": 101, "title": "网关限流", "content": "虚构网关按租户维度限流，默认每秒 100 个请求。超过限流阈值时返回 429 并附带 Retry-After 响应头。", "sourceDocument": "虚构网关部署手册.md"}
+{"chunkId": 4, "documentId": 101, "title": "网关健康检查", "content": "虚构网关每 30 秒向上游执行一次健康检查，连续失败 3 次后将该上游标记为不健康并暂停转发。", "sourceDocument": "虚构网关部署手册.md"}
+{"chunkId": 5, "documentId": 102, "title": "队列超时", "content": "虚构任务队列默认任务处理超时为 60 秒。超时任务会被判定为失败并进入重试队列。", "sourceDocument": "虚构任务队列手册.md"}
+{"chunkId": 6, "documentId": 102, "title": "队列重试", "content": "虚构任务队列对失败任务最多重试 3 次，退避策略为 1 秒、2 秒、4 秒。重试耗尽后进入死信队列。", "sourceDocument": "虚构任务队列手册.md"}
+{"chunkId": 7, "documentId": 102, "title": "队列 Worker", "content": "虚构任务队列使用固定数量的 Worker 消费任务。Worker 通过租约机制防止同一任务被并发消费。", "sourceDocument": "虚构任务队列手册.md"}
+{"chunkId": 8, "documentId": 102, "title": "队列死信", "content": "虚构任务队列的死信队列保留任务原始载荷和失败原因，供人工排查后重新入队或归档。", "sourceDocument": "虚构任务队列手册.md"}
+{"chunkId": 9, "documentId": 103, "title": "缓存 TTL", "content": "虚构缓存默认 TTL 为 5 分钟。过期键在读取时惰性淘汰，并在后台定期清理过期数据。", "sourceDocument": "虚构缓存手册.md"}
+{"chunkId": 10, "documentId": 103, "title": "缓存淘汰", "content": "虚构缓存达到容量上限时按最近最少使用策略淘汰键，不区分键的创建时间。", "sourceDocument": "虚构缓存手册.md"}
+{"chunkId": 11, "documentId": 103, "title": "缓存一致性", "content": "虚构缓存采用先更新数据库再失效缓存的顺序，失效失败时通过延迟双删兜底保证最终一致。", "sourceDocument": "虚构缓存手册.md"}
+{"chunkId": 12, "documentId": 103, "title": "分布式锁", "content": "虚构缓存提供基于 SETNX 的分布式锁，默认锁超时 30 秒，持有方需在任务结束后主动释放。", "sourceDocument": "虚构缓存手册.md"}
