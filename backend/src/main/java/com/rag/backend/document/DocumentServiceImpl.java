@@ -1,9 +1,9 @@
 package com.rag.backend.document;
 
-import com.rag.backend.agent.ingest.AgentDocumentCleanupService;
 import com.rag.backend.common.BizException;
 import com.rag.backend.course.CourseMapper;
 import com.rag.backend.document.model.CourseDocument;
+import com.rag.backend.ingestionlab.delete.DeleteRequestService;
 import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -24,7 +24,7 @@ public class DocumentServiceImpl implements DocumentService {
 
     private final DocumentMapper documentMapper;
     private final CourseMapper courseMapper;
-    private final AgentDocumentCleanupService cleanupService;
+    private final DeleteRequestService deleteRequestService;
 
     @Value("${app.upload.dir:./uploads}")
     private String uploadBaseDir;
@@ -33,10 +33,10 @@ public class DocumentServiceImpl implements DocumentService {
 
     public DocumentServiceImpl(DocumentMapper documentMapper,
                                CourseMapper courseMapper,
-                               AgentDocumentCleanupService cleanupService) {
+                               DeleteRequestService deleteRequestService) {
         this.documentMapper = documentMapper;
         this.courseMapper = courseMapper;
-        this.cleanupService = cleanupService;
+        this.deleteRequestService = deleteRequestService;
     }
 
     @PostConstruct
@@ -103,18 +103,8 @@ public class DocumentServiceImpl implements DocumentService {
 
     @Override
     public void delete(Long id) {
-        CourseDocument document = getById(id);
-
-        cleanupService.cleanupDocument(id);
-
-        try {
-            Path filePath = Paths.get(document.getFilePath());
-            Files.deleteIfExists(filePath);
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to delete uploaded file", e);
-        }
-
-        documentMapper.deleteById(id);
+        // 兼容旧 Service 调用方，但删除语义已经统一为“墓碑 + 持久 Job”。
+        deleteRequestService.request(id);
     }
 
     @Override
@@ -124,7 +114,11 @@ public class DocumentServiceImpl implements DocumentService {
         if (chunkCount != null) {
             document.setChunkCount(chunkCount);
         }
-        documentMapper.updateParseStatus(document);
+        if (documentMapper.updateParseStatus(document) != 1) {
+            // 删除墓碑已经提交时，旧摄取任务不能把展示状态重新写回 PARSED/FAILED。
+            throw new IllegalStateException(
+                    "Document is no longer active: " + id);
+        }
     }
 
     private String getFileType(String filename) {

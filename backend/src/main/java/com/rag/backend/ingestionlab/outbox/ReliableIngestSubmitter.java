@@ -4,6 +4,7 @@ package com.rag.backend.ingestionlab.outbox;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rag.backend.ingestionlab.job.IngestJob;
 import com.rag.backend.ingestionlab.job.IngestJobMapper;
+import com.rag.backend.ingestionlab.identity.PipelineManifest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -47,8 +48,37 @@ public class ReliableIngestSubmitter {
     // 事务内去重/建版本，并原子登记 Job 与 Outbox。
     public Submission submit(long documentId, String contentHash,
                              String pipelineFingerprint) {
-        if (versionMapper.lockDocument(documentId) == null) {
+        return submit(documentId, null, contentHash, pipelineFingerprint,
+                null, 1);
+    }
+
+    /**
+     * 可信入口使用的完整受理方法。可读 Manifest 与其指纹同时落库，后续 Worker
+     * 能拒绝“同一个 Version 却换了处理语义”的重放。
+     */
+    @Transactional
+    public Submission submit(long documentId,
+                             String sourceRef,
+                             String contentHash,
+                             PipelineManifest manifest) {
+        return submit(documentId, sourceRef, contentHash,
+                manifest.fingerprint().value(), json(manifest), 1);
+    }
+
+    private Submission submit(long documentId,
+                              String sourceRef,
+                              String contentHash,
+                              String pipelineFingerprint,
+                              String pipelineManifest,
+                              int manifestSchemaVersion) {
+        DocumentVersionMapper.LockedDocumentRow document =
+                versionMapper.lockDocument(documentId);
+        if (document == null) {
             throw new IllegalArgumentException("Unknown document: " + documentId);
+        }
+        if (!"ACTIVE".equals(document.getLifecycleStatus())) {
+            throw new IllegalStateException(
+                    "Document is not ingestible: " + document.getLifecycleStatus());
         }
         DocumentVersionRow existing = versionMapper.findIdentity(
                 documentId, contentHash, pipelineFingerprint);
@@ -70,6 +100,9 @@ public class ReliableIngestSubmitter {
         version.setVersionNo(versionMapper.nextVersionNo(documentId));
         version.setContentHash(contentHash);
         version.setPipelineFingerprint(pipelineFingerprint);
+        version.setSourceRef(sourceRef);
+        version.setPipelineManifest(pipelineManifest);
+        version.setManifestSchemaVersion(manifestSchemaVersion);
         version.setState("UPLOADED");
         version.setStateVersion(0L);
         versionMapper.insert(version);
@@ -78,6 +111,7 @@ public class ReliableIngestSubmitter {
         LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
         IngestJob job = new IngestJob();
         job.setJobId(jobId);
+        job.setDocumentId(documentId);
         job.setDocumentVersionId(version.getId());
         job.setJobType("INGEST");
         job.setMaxAttempts(5);

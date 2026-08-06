@@ -79,6 +79,26 @@ public final class ReplayableChunkStage {
         }
     }
 
+    /**
+     * 按 outputRef 重新读取并核验制品，返回完整 Chunk 列表。
+     * Orchestrator 在重放已完成步骤时调用。
+     */
+    public List<ChunkSnapshot> loadVerified(String outputRef,
+                                             String parseDigest,
+                                             String pipelineFingerprint) {
+        ChunkEnvelope envelope = decode(store.read(outputRef));
+        if (!parseDigest.equals(envelope.parseDigest())
+                || !pipelineFingerprint.equals(envelope.pipelineFingerprint())) {
+            throw new IllegalStateException(
+                    "Chunk artifact input mismatch; create a new version");
+        }
+        String actualDigest = digest(envelope.chunks());
+        if (!actualDigest.equals(envelope.outputDigest())) {
+            throw new IllegalStateException("Corrupted chunk artifact");
+        }
+        return envelope.chunks();
+    }
+
     // ChunkSnapshot：切块阶段的不可变输出，附带业务键和内容摘要供重放。
     public record ChunkSnapshot(int index, String title, String content,
                                 Integer sourcePage, int tokenCount,

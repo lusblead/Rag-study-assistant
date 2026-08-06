@@ -6,6 +6,7 @@ import com.rag.backend.agent.model.PageText;
 import com.rag.backend.agent.model.ParsedDocument;
 import com.rag.backend.agent.parse.DocumentParser;
 import com.rag.backend.agent.parse.DocumentParserFactory;
+import com.rag.backend.ingestionlab.identity.StableHash;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -64,5 +65,31 @@ class ReplayableParseStageTest {
                 () -> stage.execute(9L, dir.resolve("b.pdf"), "pdf",
                         "hash-b", "pipeline"));
         assertTrue(error.getMessage().contains("input mismatch"));
+    }
+
+    @Test
+    void refusesUnsupportedSchemaBeforeReusingArtifact(@TempDir Path dir)
+            throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        FileArtifactStore store = new FileArtifactStore(dir);
+        ParseSnapshot snapshot = ParseSnapshot.from(
+                new ParsedDocument("title", "content", List.of()));
+        String snapshotJson = objectMapper.writeValueAsString(snapshot);
+        ReplayableParseStage.Envelope oldEnvelope =
+                new ReplayableParseStage.Envelope(
+                        0,
+                        "source-hash",
+                        "pipeline",
+                        StableHash.sha256(snapshotJson),
+                        snapshot);
+        store.writeAtomically(
+                "3/parsed.json",
+                objectMapper.writeValueAsBytes(oldEnvelope));
+        ReplayableParseStage stage = new ReplayableParseStage(
+                new DocumentParserFactory(List.of()), store, objectMapper);
+
+        assertThrows(IllegalStateException.class, () -> stage.execute(
+                3L, dir.resolve("unused.txt"), "txt",
+                "source-hash", "pipeline"));
     }
 }

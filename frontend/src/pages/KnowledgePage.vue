@@ -86,16 +86,16 @@
                 {{ document.chunkCount ?? 0 }} 个片段
               </small>
             </div>
-            <StatusBadge :status="document.parseStatus" />
+            <StatusBadge :status="jobState(document.id) || document.parseStatus" />
             <div class="row-actions">
               <button class="ghost" type="button" @click="openPreview(document)">查看</button>
-              <button :disabled="busy || document.parseStatus === 'PARSING'" type="button" @click="ingest(document.id)">
-                {{ document.parseStatus === "PARSING" ? "解析中" : document.parseStatus === "PARSED" ? "重新入库" : "解析入库" }}
+              <button :disabled="busy || isJobRunning(document.id)" type="button" @click="ingest(document.id)">
+                {{ isJobRunning(document.id) ? jobLabel(document.id) : document.parseStatus === "PARSED" ? "重新入库" : "解析入库" }}
               </button>
               <a class="button-link ghost" :href="api.documentFileUrl(document.id)" target="_blank" rel="noreferrer">
                 下载
               </a>
-              <button class="danger" :disabled="busy || document.parseStatus === 'PARSING'" type="button" @click="removeDocument(document.id)">删除</button>
+              <button class="danger" :disabled="busy || isJobRunning(document.id)" type="button" @click="removeDocument(document.id)">删除</button>
             </div>
           </article>
         </div>
@@ -179,7 +179,7 @@ import CourseForm from "../components/CourseForm.vue";
 import EmptyState from "../components/EmptyState.vue";
 import Panel from "../components/Panel.vue";
 import StatusBadge from "../components/StatusBadge.vue";
-import type { Course, CourseDocument } from "../types";
+import type { Course, CourseDocument, DeleteSubmission, IngestionJob, IngestSubmission } from "../types";
 
 const props = defineProps<{
   course: Course | null;
@@ -203,6 +203,9 @@ const dragActive = ref(false);
 const showCreateCourseModal = ref(false);
 const showEditCourseModal = ref(false);
 const previewDocument = ref<CourseDocument | null>(null);
+const JOBS_STORAGE_KEY = "rag-study-assistant:document-jobs";
+// jobId 是刷新页面后继续查询的唯一身份，不能只保存在当前组件内存中。
+const jobsByDocument = ref<Record<number, IngestionJob>>(loadStoredJobs());
 const editCourseId = ref<number | null>(null);
 const editName = ref("");
 const editTerm = ref("");
@@ -321,7 +324,9 @@ async function loadDocuments() {
 }
 
 function syncStatusPolling() {
-  const needsPolling = documents.value.some((document) => document.parseStatus === "PARSING");
+  const needsPolling = Object.values(jobsByDocument.value).some((job) =>
+    ["QUEUED", "RUNNING", "RETRY_WAIT"].includes(job.state)
+  );
   if (needsPolling && statusPollTimer === null) {
     statusPollTimer = window.setInterval(() => void pollDocumentStatus(), 3000);
   } else if (!needsPolling && statusPollTimer !== null) {
@@ -331,16 +336,91 @@ function syncStatusPolling() {
 }
 
 async function pollDocumentStatus() {
-  if (!props.course) {
-    syncStatusPolling();
-    return;
-  }
+  const running = Object.values(jobsByDocument.value).filter((job) =>
+    ["QUEUED", "RUNNING", "RETRY_WAIT"].includes(job.state)
+  );
+  if (!running.length) return syncStatusPolling();
+
+  const next = { ...jobsByDocument.value };
+  let reachedTerminal = false;
+  await Promise.all(running.map(async (job) => {
+    try {
+      const latest = await api.getIngestionJob(job.jobId);
+      next[latest.documentId] = latest;
+      reachedTerminal ||= ["SUCCEEDED", "FAILED"].includes(latest.state);
+    } catch {
+      // 短暂查询失败不丢失 jobId；下一轮继续查询同一个持久任务。
+    }
+  }));
+  replaceJobs(next);
+  if (reachedTerminal) await loadDocuments();
+  syncStatusPolling();
+}
+
+function rememberSubmission(documentId: number, submission: IngestSubmission) {
+  replaceJobs({
+    ...jobsByDocument.value,
+    [documentId]: {
+      jobId: submission.jobId,
+      documentId,
+      documentVersionId: submission.documentVersionId,
+      jobType: "INGEST",
+      state: "QUEUED",
+      attempt: 0,
+      maxAttempts: 5,
+      errorCode: null
+    }
+  });
+  syncStatusPolling();
+}
+
+function rememberDeleteSubmission(submission: DeleteSubmission) {
+  replaceJobs({
+    ...jobsByDocument.value,
+    [submission.documentId]: {
+      jobId: submission.jobId,
+      documentId: submission.documentId,
+      documentVersionId: null,
+      jobType: "DELETE",
+      state: submission.alreadyDeleted ? "SUCCEEDED" : "QUEUED",
+      attempt: 0,
+      maxAttempts: 20,
+      errorCode: null
+    }
+  });
+  syncStatusPolling();
+}
+
+function loadStoredJobs(): Record<number, IngestionJob> {
   try {
-    documents.value = await api.listDocuments(props.course.id);
-    syncStatusPolling();
+    const raw = window.localStorage.getItem(JOBS_STORAGE_KEY);
+    return raw ? JSON.parse(raw) as Record<number, IngestionJob> : {};
   } catch {
-    // Keep polling; a transient refresh failure must not cancel the background task UI.
+    return {};
   }
+}
+
+function replaceJobs(next: Record<number, IngestionJob>) {
+  jobsByDocument.value = next;
+  // 只保存 Job 状态和稳定标识，不保存文档正文、密钥或供应商错误详情。
+  try {
+    window.localStorage.setItem(JOBS_STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    // 浏览器禁用持久存储时仍保留当前页面内的轮询，不影响后端持久 Job。
+  }
+}
+
+function jobState(documentId: number) {
+  return jobsByDocument.value[documentId]?.state;
+}
+
+function isJobRunning(documentId: number) {
+  const state = jobState(documentId);
+  return !!state && ["QUEUED", "RUNNING", "RETRY_WAIT"].includes(state);
+}
+
+function jobLabel(documentId: number) {
+  return jobState(documentId) === "RETRY_WAIT" ? "等待重试" : "处理中";
 }
 
 onBeforeUnmount(() => {
@@ -362,7 +442,7 @@ async function upload() {
       const uploaded = await api.uploadDocument(props.course.id, selectedFile);
       uploadedCount += 1;
       if (autoIngest.value) {
-        await api.ingestDocument(uploaded.id);
+        rememberSubmission(uploaded.id, await api.ingestDocument(uploaded.id));
       }
     }
     emit(
@@ -384,7 +464,7 @@ async function upload() {
 async function ingest(documentId: number) {
   busy.value = true;
   try {
-    await api.ingestDocument(documentId);
+    rememberSubmission(documentId, await api.ingestDocument(documentId));
     emit("notify", "success", "已提交后台解析任务");
     await loadDocuments();
   } catch (error) {
@@ -398,8 +478,9 @@ async function removeDocument(documentId: number) {
   if (!window.confirm("确定删除该文档及其知识片段吗？")) return;
   busy.value = true;
   try {
-    await api.deleteDocument(documentId);
-    emit("notify", "success", "文档已删除");
+    const submission = await api.deleteDocument(documentId);
+    rememberDeleteSubmission(submission);
+    emit("notify", "success", submission.alreadyDeleted ? "文档已经删除" : "删除任务已提交，文档已停止检索");
     await loadDocuments();
   } catch (error) {
     emit("notify", "error", error instanceof Error ? error.message : "删除失败");

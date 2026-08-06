@@ -4,6 +4,10 @@ import com.rag.backend.common.BizException;
 import com.rag.backend.common.Result;
 import com.rag.backend.common.TextFileDecoder;
 import com.rag.backend.document.model.CourseDocument;
+import com.rag.backend.ingestionlab.application.IngestApplicationService;
+import com.rag.backend.ingestionlab.application.IngestSubmissionResponse;
+import com.rag.backend.ingestionlab.delete.DeleteRequestService;
+import com.rag.backend.ingestionlab.delete.DeleteSubmissionResponse;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 import org.springframework.http.HttpHeaders;
@@ -24,12 +28,15 @@ import java.util.List;
 public class DocumentController {
 
     private final DocumentService documentService;
-    private final DocumentIngestTaskService ingestTaskService;
+    private final IngestApplicationService ingestApplicationService;
+    private final DeleteRequestService deleteRequestService;
 
     public DocumentController(DocumentService documentService,
-                              DocumentIngestTaskService ingestTaskService) {
+                              IngestApplicationService ingestApplicationService,
+                              DeleteRequestService deleteRequestService) {
         this.documentService = documentService;
-        this.ingestTaskService = ingestTaskService;
+        this.ingestApplicationService = ingestApplicationService;
+        this.deleteRequestService = deleteRequestService;
     }
 
     /**
@@ -54,9 +61,11 @@ public class DocumentController {
     }
 
     @PostMapping("/{id}/ingest")
-    public ResponseEntity<Result<CourseDocument>> ingest(@PathVariable Long id) {
-        CourseDocument document = ingestTaskService.submit(id);
-        return ResponseEntity.accepted().body(Result.ok(document));
+    public ResponseEntity<Result<IngestSubmissionResponse>> ingest(
+            @PathVariable Long id) {
+        var submission = ingestApplicationService.submit(id);
+        return ResponseEntity.accepted().body(
+                Result.ok(IngestSubmissionResponse.from(submission)));
     }
 
     @GetMapping("/{id}/file")
@@ -107,8 +116,10 @@ public class DocumentController {
      * DELETE /api/documents/{id}
      */
     @DeleteMapping("/{id}")
-    public Result<Void> delete(@PathVariable Long id) {
-        documentService.delete(id);
-        return Result.ok();
+    public ResponseEntity<Result<DeleteSubmissionResponse>> delete(
+            @PathVariable Long id) {
+        var submission = deleteRequestService.request(id);
+        return ResponseEntity.accepted().body(
+                Result.ok(DeleteSubmissionResponse.from(submission)));
     }
 }

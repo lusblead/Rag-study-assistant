@@ -8,9 +8,21 @@ public class DocumentVersionRow {
     private Integer versionNo;
     private String contentHash;
     private String pipelineFingerprint;
+    private String sourceRef;
+    private String pipelineManifest;
+    private Integer manifestSchemaVersion;
     private String state;
     private Long stateVersion;
+    // 解析和切块完成后写入，Verifier 用它判断“应该有多少个 Chunk”。
+    private Integer expectedChunkCount;
 
+    public Integer getExpectedChunkCount() {
+        return expectedChunkCount;
+    }
+
+    public void setExpectedChunkCount(Integer expectedChunkCount) {
+        this.expectedChunkCount = expectedChunkCount;
+    }
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
     public Long getDocumentId() { return documentId; }
@@ -21,6 +33,12 @@ public class DocumentVersionRow {
     public void setContentHash(String contentHash) { this.contentHash = contentHash; }
     public String getPipelineFingerprint() { return pipelineFingerprint; }
     public void setPipelineFingerprint(String value) { this.pipelineFingerprint = value; }
+    public String getSourceRef() { return sourceRef; }
+    public void setSourceRef(String sourceRef) { this.sourceRef = sourceRef; }
+    public String getPipelineManifest() { return pipelineManifest; }
+    public void setPipelineManifest(String pipelineManifest) { this.pipelineManifest = pipelineManifest; }
+    public Integer getManifestSchemaVersion() { return manifestSchemaVersion; }
+    public void setManifestSchemaVersion(Integer manifestSchemaVersion) { this.manifestSchemaVersion = manifestSchemaVersion; }
     public String getState() { return state; }
     public void setState(String state) { this.state = state; }
     public Long getStateVersion() { return stateVersion; }

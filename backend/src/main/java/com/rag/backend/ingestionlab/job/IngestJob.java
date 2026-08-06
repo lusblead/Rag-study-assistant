@@ -7,6 +7,7 @@ import java.time.LocalDateTime;
 public class IngestJob {
     // jobId 标识逻辑任务；documentVersionId/jobType 把任务绑定到具体文档版本与处理类型。
     private String jobId;
+    private Long documentId;
     private Long documentVersionId;
     private String jobType;
     // state 是任务生命周期；attempt/maxAttempts 共同限制失败重试次数。
@@ -26,6 +27,8 @@ public class IngestJob {
 
     public String getJobId() { return jobId; }
     public void setJobId(String jobId) { this.jobId = jobId; }
+    public Long getDocumentId() { return documentId; }
+    public void setDocumentId(Long documentId) { this.documentId = documentId; }
     public Long getDocumentVersionId() { return documentVersionId; }
     public void setDocumentVersionId(Long value) { this.documentVersionId = value; }
     public String getJobType() { return jobType; }

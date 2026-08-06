@@ -18,6 +18,12 @@ public class CourseDocument {
 
     private Integer chunkCount;
 
+    /** 当前允许在线检索的版本；新版未核验通过前不会覆盖该指针。 */
+    private Long activeVersionId;
+
+    /** ACTIVE / DELETING / DELETED，控制文档整体可见性。 */
+    private String lifecycleStatus;
+
     private LocalDateTime createdAt;
 
     private LocalDateTime updatedAt;
@@ -48,6 +54,12 @@ public class CourseDocument {
 
     public Integer getChunkCount() { return chunkCount; }
     public void setChunkCount(Integer chunkCount) { this.chunkCount = chunkCount; }
+
+    public Long getActiveVersionId() { return activeVersionId; }
+    public void setActiveVersionId(Long activeVersionId) { this.activeVersionId = activeVersionId; }
+
+    public String getLifecycleStatus() { return lifecycleStatus; }
+    public void setLifecycleStatus(String lifecycleStatus) { this.lifecycleStatus = lifecycleStatus; }
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }

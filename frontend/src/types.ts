@@ -43,8 +43,34 @@ export type CourseDocument = {
   filePath?: string;
   parseStatus?: "UPLOADED" | "PARSING" | "PARSED" | "FAILED" | string;
   chunkCount?: number;
+  activeVersionId?: number | null;
+  lifecycleStatus?: "ACTIVE" | "DELETING" | "DELETED" | string;
   createdAt?: string;
   updatedAt?: string;
+};
+
+export type IngestSubmission = {
+  documentVersionId: number;
+  jobId: string;
+  reused: boolean;
+};
+
+export type DeleteSubmission = {
+  documentId: number;
+  jobId: string;
+  reused: boolean;
+  alreadyDeleted: boolean;
+};
+
+export type IngestionJob = {
+  jobId: string;
+  documentId: number;
+  documentVersionId?: number | null;
+  jobType: "INGEST" | "DELETE" | string;
+  state: "QUEUED" | "RUNNING" | "RETRY_WAIT" | "SUCCEEDED" | "FAILED" | string;
+  attempt: number;
+  maxAttempts: number;
+  errorCode?: string | null;
 };
 
 export type RetrievedChunk = {

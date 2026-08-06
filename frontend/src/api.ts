@@ -5,6 +5,9 @@ import type {
   ChatSession,
   Course,
   CourseDocument,
+  DeleteSubmission,
+  IngestionJob,
+  IngestSubmission,
   ModelSettingsResponse,
   ModelSettingsTestResponse,
   ModelSettingsTestTarget,
@@ -221,8 +224,11 @@ export const api = {
     return request<CourseDocument>("/api/documents/upload", { method: "POST", body: form });
   },
   ingestDocument: (documentId: number) =>
-    request<CourseDocument>(`/api/documents/${documentId}/ingest`, { method: "POST" }),
-  deleteDocument: (documentId: number) => request<void>(`/api/documents/${documentId}`, { method: "DELETE" }),
+    request<IngestSubmission>(`/api/documents/${documentId}/ingest`, { method: "POST" }),
+  getIngestionJob: (jobId: string) =>
+    request<IngestionJob>(`/api/ingestion/jobs/${encodeURIComponent(jobId)}`),
+  deleteDocument: (documentId: number) =>
+    request<DeleteSubmission>(`/api/documents/${documentId}`, { method: "DELETE" }),
 
   chat: (payload: { courseId: number; sessionId?: number | null; question: string }) =>
     request<RagChatResponse>("/api/agent/chat", { method: "POST", body: JSON.stringify(payload) }),

@@ -14,9 +14,16 @@ spring:
 
   sql:
     init:
-      mode: always
+      mode: never
       schema-locations: classpath:db/schema.sql
       continue-on-error: true
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    baseline-version: 1
+    validate-on-migrate: true
 
   servlet:
     multipart:
@@ -35,8 +42,18 @@ milvus:
 
 # 方案三第 07 章：新 collection，主键为应用计算的确定性 vectorId。
 ingestion:
+  artifact:
+    # 解析与切块制品必须位于受控根目录；删除 Saga 只按 version 前缀清理。
+    dir: ${INGESTION_ARTIFACT_DIR:${APP_UPLOAD_DIR:./uploads}/.ingestion-artifacts}
+  scheduling:
+    enabled: ${INGESTION_SCHEDULING_ENABLED:true}
+  job:
+    # Worker 会在阶段边界续租；单次不可中断调用仍必须小于该期限。
+    lease-duration: ${INGESTION_JOB_LEASE_DURATION:PT5M}
   milvus:
     collection-name: ${INGESTION_MILVUS_COLLECTION:knowledge_chunk_vectors_ingestion_v2}
+    # 生产保持 AUTOINDEX；公开效果评测通过独立参数使用 FLAT 精确索引。
+    index-type: ${INGESTION_MILVUS_INDEX_TYPE:AUTOINDEX}
 
 vector:
   provider: ${VECTOR_PROVIDER:milvus}

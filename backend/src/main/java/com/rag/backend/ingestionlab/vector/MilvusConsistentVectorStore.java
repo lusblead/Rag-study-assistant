@@ -3,6 +3,8 @@ package com.rag.backend.ingestionlab.vector;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
+import com.rag.backend.ingestionlab.retrieval.VersionedVectorHit;
+import com.rag.backend.ingestionlab.retrieval.VersionedVectorSearch;
 import io.milvus.v2.client.ConnectConfig;
 import io.milvus.v2.client.MilvusClientV2;
 import io.milvus.v2.common.DataType;
@@ -16,32 +18,39 @@ import io.milvus.v2.service.vector.request.SearchReq;
 import io.milvus.v2.service.vector.request.UpsertReq;
 import io.milvus.v2.service.vector.request.data.FloatVec;
 import io.milvus.v2.service.vector.response.QueryResp;
+import io.milvus.v2.service.utility.request.FlushReq;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
+@ConditionalOnExpression("'${agent.mock:false}' == 'false' && '${vector.provider:milvus}' == 'milvus'")
 // MilvusConsistentVectorStore：ConsistentVectorStore 的 Milvus 实现，使用新 collection，
 // 主键为应用计算的确定性 vectorId，同时保存完整业务身份元数据供对账。
-public class MilvusConsistentVectorStore implements ConsistentVectorStore {
+public class MilvusConsistentVectorStore
+        implements ConsistentVectorStore, VersionedVectorSearch {
     private static final Logger log = LoggerFactory.getLogger(MilvusConsistentVectorStore.class);
 
     private final MilvusClientV2 client;
     private final String collectionName;
     private final int embeddingDimension;
+    private final IndexParam.IndexType indexType;
     private final Gson gson = new Gson();
 
     // 从配置读取新 collection 名称与维度；旧 collection 不受影响。
     public MilvusConsistentVectorStore(@Value("${milvus.host}") String host,
                                        @Value("${milvus.port}") int port,
                                        @Value("${ingestion.milvus.collection-name}") String collectionName,
-                                       @Value("${milvus.embedding-dimension}") int embeddingDimension) {
+                                       @Value("${milvus.embedding-dimension}") int embeddingDimension,
+                                       @Value("${ingestion.milvus.index-type:AUTOINDEX}") String indexType) {
         this.collectionName = collectionName;
         this.embeddingDimension = embeddingDimension;
+        this.indexType = parseIndexType(indexType);
         ConnectConfig config = ConnectConfig.builder()
                 .uri("http://" + host + ":" + port)
                 .build();
@@ -95,6 +104,7 @@ public class MilvusConsistentVectorStore implements ConsistentVectorStore {
 
         IndexParam indexParam = IndexParam.builder()
                 .fieldName("embedding")
+                .indexType(this.indexType)
                 .metricType(IndexParam.MetricType.COSINE)
                 .build();
 
@@ -105,6 +115,21 @@ public class MilvusConsistentVectorStore implements ConsistentVectorStore {
                 .build();
         client.createCollection(createReq);
         log.info("Milvus collection '{}' created with dimension {}", collectionName, embeddingDimension);
+    }
+
+    // 生产默认使用 AUTOINDEX；评测可以显式传入 FLAT，避免索引重建的近似召回波动。
+    static IndexParam.IndexType parseIndexType(String configuredValue) {
+        if (configuredValue == null || configuredValue.isBlank()) {
+            return IndexParam.IndexType.AUTOINDEX;
+        }
+        try {
+            return IndexParam.IndexType.valueOf(
+                    configuredValue.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException invalidIndexType) {
+            throw new IllegalArgumentException(
+                    "不支持的 Milvus index type: " + configuredValue,
+                    invalidIndexType);
+        }
     }
 
     // ── ConsistentVectorStore 实现 ────────────────────────────────────
@@ -128,6 +153,20 @@ public class MilvusConsistentVectorStore implements ConsistentVectorStore {
                 .data(Collections.singletonList(row))
                 .build();
         client.upsert(req);
+    }
+
+    /**
+     * 等待当前 collection 的已写入 segment 完成 flush。
+     * 在线链路不应每条写入都调用；评测和批量导入只在完整批次边界调用一次。
+     */
+    public void flush(long timeoutMs) {
+        if (timeoutMs <= 0) {
+            throw new IllegalArgumentException("Milvus flush timeout 必须大于 0");
+        }
+        client.flush(FlushReq.builder()
+                .collectionNames(List.of(collectionName))
+                .waitFlushedTimeoutMs(timeoutMs)
+                .build());
     }
 
     @Override
@@ -159,27 +198,65 @@ public class MilvusConsistentVectorStore implements ConsistentVectorStore {
 
     @Override
     public long countByVersion(long documentVersionId) {
-        // 用简单查询表达式统计指定 version 下的向量数。
-        QueryResp resp = client.query(QueryReq.builder()
-                .collectionName(collectionName)
-                .filter("document_version_id == " + documentVersionId)
-                .outputFields(Collections.singletonList("vector_id"))
-                .limit(10000) // Milvus query 默认限制较小，按需调大。
-                .build());
-        return resp.getQueryResults().size();
+        return listIdsByVersion(documentVersionId).size();
     }
 
     @Override
     public Set<Long> listIdsByVersion(long documentVersionId) {
-        QueryResp resp = client.query(QueryReq.builder()
+        final int pageSize = 1_000;
+        long offset = 0;
+        Set<Long> result = new HashSet<>();
+        while (true) {
+            QueryResp response = client.query(QueryReq.builder()
+                    .collectionName(collectionName)
+                    .filter("document_version_id == " + documentVersionId)
+                    .outputFields(Collections.singletonList("vector_id"))
+                    .offset(offset)
+                    .limit(pageSize)
+                    .build());
+            List<QueryResp.QueryResult> page = response.getQueryResults();
+            for (QueryResp.QueryResult row : page) {
+                result.add(toLong(row.getEntity().get("vector_id")));
+            }
+            if (page.size() < pageSize) {
+                return Set.copyOf(result);
+            }
+            offset += page.size();
+        }
+    }
+
+    @Override
+    public List<VersionedVectorHit> search(
+            long courseId,
+            Set<Long> activeVersionIds,
+            List<Double> queryVector,
+            int topK) {
+        if (activeVersionIds.isEmpty() || topK <= 0) {
+            return List.of();
+        }
+        String versions = activeVersionIds.stream()
+                .sorted()
+                .map(String::valueOf)
+                .collect(Collectors.joining(", "));
+        SearchReq request = SearchReq.builder()
                 .collectionName(collectionName)
-                .filter("document_version_id == " + documentVersionId)
-                .outputFields(Collections.singletonList("vector_id"))
-                .limit(10000)
-                .build());
-        return resp.getQueryResults().stream()
-                .map(r -> toLong(r.getEntity().get("vector_id")))
-                .collect(Collectors.toSet());
+                .data(Collections.singletonList(
+                        new FloatVec(toFloatArray(queryVector))))
+                .filter("course_id == " + courseId
+                        + " && document_version_id in [" + versions + "]")
+                .topK(topK)
+                .outputFields(List.of("mysql_chunk_id", "document_version_id"))
+                .build();
+        var searchResults = client.search(request).getSearchResults();
+        if (searchResults.isEmpty()) {
+            return List.of();
+        }
+        return searchResults.get(0).stream()
+                .map(result -> new VersionedVectorHit(
+                        toLong(result.getEntity().get("mysql_chunk_id")),
+                        toLong(result.getEntity().get("document_version_id")),
+                        result.getScore().doubleValue()))
+                .toList();
     }
 
     @Override
@@ -199,6 +276,14 @@ public class MilvusConsistentVectorStore implements ConsistentVectorStore {
             floats.add(value.floatValue());
         }
         return floats;
+    }
+
+    private float[] toFloatArray(List<Double> embedding) {
+        float[] values = new float[embedding.size()];
+        for (int index = 0; index < embedding.size(); index++) {
+            values[index] = embedding.get(index).floatValue();
+        }
+        return values;
     }
 
     private long toLong(Object value) {

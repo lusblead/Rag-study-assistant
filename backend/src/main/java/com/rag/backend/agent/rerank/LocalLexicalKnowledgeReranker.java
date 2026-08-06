@@ -33,7 +33,14 @@ public class LocalLexicalKnowledgeReranker implements KnowledgeReranker {
         Set<String> queryTerms = tokenize(query);
         return chunks.stream()
                 .map(chunk -> chunk.withScore(combinedScore(chunk, queryTerms)))
-                .sorted(Comparator.comparing(RetrievedChunk::score).reversed())
+                // 分数相同时使用稳定业务 ID，避免底层向量库返回顺序变化污染 A/B 结果。
+                .sorted(Comparator
+                        .comparing(RetrievedChunk::score,
+                                Comparator.nullsLast(Comparator.reverseOrder()))
+                        .thenComparing(RetrievedChunk::chunkId,
+                                Comparator.nullsLast(Comparator.naturalOrder()))
+                        .thenComparing(RetrievedChunk::documentId,
+                                Comparator.nullsLast(Comparator.naturalOrder())))
                 .limit(topK)
                 .toList();
     }

@@ -2,6 +2,7 @@
 package com.rag.backend.ingestionlab.job;
 
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -19,9 +20,11 @@ public class JobLeaseService {
     private final Duration leaseDuration;
 
     @org.springframework.beans.factory.annotation.Autowired
-    // Spring 生产构造器使用 UTC 时钟和 45 秒默认 Lease；测试构造器可传入固定时钟与短期限。
-    public JobLeaseService(IngestJobMapper mapper) {
-        this(mapper, Clock.systemUTC(), Duration.ofSeconds(45));
+    // Spring 生产构造器使用 UTC 与配置期限；测试构造器可传入固定时钟与短期限。
+    public JobLeaseService(
+            IngestJobMapper mapper,
+            @Value("${ingestion.job.lease-duration:PT5M}") Duration leaseDuration) {
+        this(mapper, Clock.systemUTC(), leaseDuration);
     }
 
     JobLeaseService(IngestJobMapper mapper, Clock clock, Duration leaseDuration) {
@@ -57,15 +60,18 @@ public class JobLeaseService {
                 lease.stateVersion() + 1);
     }
 
-    // 完成和重试都走 owner CAS，旧 Worker 不可覆盖。
-    public void succeed(Lease lease) {
-        finish(lease, "SUCCEEDED", null, null, now());
+    /**
+     * 在一次编排期间保存最新 Lease token。
+     * Orchestrator 每次续租都会更新同一个 Session，Worker 即使在后续步骤抛错，
+     * 仍可用最新 stateVersion 提交 retry/fail，而不会误用最初的旧 token。
+     */
+    public LeaseSession openSession(Lease initialLease) {
+        return new LeaseSession(initialLease);
     }
 
     // 完成和重试都走 owner CAS，旧 Worker 不可覆盖。
-    public void retry(Lease lease, String errorCode, String safeDetail,
-                      Duration backoff) {
-        finish(lease, "RETRY_WAIT", errorCode, safeDetail, now().plus(backoff));
+    public void succeed(Lease lease) {
+        finish(lease, "SUCCEEDED", null, null, now());
     }
 
     // 完成和重试都走 owner CAS，旧 Worker 不可覆盖。
@@ -94,6 +100,23 @@ public class JobLeaseService {
     public record Lease(String jobId, String owner,
                         LocalDateTime leaseUntil, long stateVersion) { }
 
+    public final class LeaseSession {
+        private Lease current;
+
+        private LeaseSession(Lease initialLease) {
+            this.current = initialLease;
+        }
+
+        public Lease current() {
+            return current;
+        }
+
+        public Lease renew() {
+            current = JobLeaseService.this.renew(current);
+            return current;
+        }
+    }
+
     // LeaseNotAcquiredException：稳定失败类型，上层不解析异常文案。
     public static final class LeaseNotAcquiredException extends RuntimeException {
         // 异常类型表示本次从未取得执行权，消息中的 jobId 只用于定位。
@@ -103,5 +126,45 @@ public class JobLeaseService {
     public static final class LeaseLostException extends RuntimeException {
         // 异常类型表示原 owner 已失去提交权，Worker 捕获后必须停止后续回写。
         public LeaseLostException(String id) { super("Lease lost: " + id); }
+    }
+
+    /**
+     * 永久错误直接结束任务。
+     * errorCode 使用稳定机器码；detail 只能放脱敏摘要，不能写文档原文或密钥。
+     */
+    public void fail(
+            Lease lease,
+            String errorCode,
+            String safeDetail) {
+        finish(lease, "FAILED", errorCode, safeDetail, now());
+    }
+
+    /**
+     * 瞬时错误只有在剩余尝试次数内才进入 RETRY_WAIT。
+     * attempt 在成功领取时已经加一，所以 current.attempt >= maxAttempts
+     * 表示本次已是最后一次允许的执行。
+     */
+    public void retry(
+            Lease lease,
+            String errorCode,
+            String safeDetail,
+            Duration backoff) {
+        IngestJob current = requireJob(lease.jobId());
+        if (!"RUNNING".equals(current.getState())
+                || !lease.owner().equals(current.getLeaseOwner())
+                || current.getStateVersion() != lease.stateVersion()) {
+            throw new LeaseLostException(lease.jobId());
+        }
+
+        if (current.getAttempt() >= current.getMaxAttempts()) {
+            fail(lease, "RETRY_EXHAUSTED", safeDetail);
+            return;
+        }
+        finish(
+                lease,
+                "RETRY_WAIT",
+                errorCode,
+                safeDetail,
+                now().plus(backoff));
     }
 }

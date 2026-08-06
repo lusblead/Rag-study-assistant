@@ -115,3 +115,48 @@ ALTER TABLE knowledge_chunks
     -- 失败码用于重试决策和对账，不能只写 FAILED 而丢失原因。
     ADD COLUMN embedding_error_code VARCHAR(64) NULL,
     ADD UNIQUE KEY uk_vector_business_id (vector_business_id);
+
+-- 字段目的：lifecycle 控制文档可见性，verification 报告保存激活证据。
+ALTER TABLE documents
+    ADD COLUMN lifecycle_status VARCHAR(24) NOT NULL DEFAULT 'ACTIVE',
+    ADD COLUMN deleted_at DATETIME(6) NULL;
+
+ALTER TABLE document_versions
+    ADD COLUMN verification_digest CHAR(64) NULL,
+    ADD COLUMN verification_report JSON NULL;
+
+-- 表用途：把每个稳定差异保存为可去重、可重开、可审计的 Issue，并记录最后一次完整扫描。
+-- reconciliation_issues 保存持久化事实，不能只依赖进程内对象。
+CREATE TABLE reconciliation_issues (
+                                       issue_id            CHAR(36)      PRIMARY KEY,
+    -- 稳定问题键，同一差异只更新一行。
+                                       issue_key           CHAR(64)      NOT NULL,
+    -- 版本归属，跨存储对账的批次边界。
+                                       document_version_id BIGINT        NOT NULL,
+                                       issue_type          VARCHAR(64)   NOT NULL,
+                                       subject_key         VARCHAR(160)  NOT NULL,
+                                       expected_value      VARCHAR(500)  NULL,
+                                       actual_value        VARCHAR(500)  NULL,
+                                       suggested_action    VARCHAR(64)   NOT NULL,
+    -- 稳定机器状态，由状态机与条件更新约束。
+                                       state               VARCHAR(20)   NOT NULL,
+    -- Issue 的乐观锁版本；Claim、完成、失败和重开都必须通过 CAS。
+                                       state_version       BIGINT        NOT NULL DEFAULT 0,
+    -- 修复租约与 Job Lease 类似，只授予当前 Worker 临时执行权。
+                                       claimed_by          VARCHAR(128)  NULL,
+                                       claim_until         DATETIME(6)   NULL,
+                                       repair_attempt      INT           NOT NULL DEFAULT 0,
+                                       last_error_code     VARCHAR(64)   NULL,
+    -- 最近看见问题的扫描 ID，用于安全关闭。
+                                       last_seen_run_id    CHAR(36)      NOT NULL,
+                                       first_seen_at       DATETIME(6)   NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+                                       last_seen_at        DATETIME(6)   NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+                                       resolved_at         DATETIME(6)   NULL,
+                                       resolution_note     VARCHAR(500)  NULL,
+    -- 并发防线：唯一键最终裁决先查后插竞态。
+                                       UNIQUE KEY uk_issue_key (issue_key),
+    -- 访问索引：轮询/对账避免全表扫描。
+                                       INDEX idx_issue_state (state, issue_type, claim_until, last_seen_at),
+    -- 访问索引：轮询/对账避免全表扫描。
+                                       INDEX idx_issue_version (document_version_id, state)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

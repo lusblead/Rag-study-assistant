@@ -35,6 +35,7 @@ public final class ReplayableParseStage {
         // Replay 命中仍要核对输入身份与输出摘要。
         if (store.exists(key)) {
             Envelope envelope = decode(store.read(key));
+            requireSupportedSchema(envelope);
             requireSameInput(envelope, sourceHash, pipelineFingerprint);
             requireSnapshotDigest(envelope);
             return new Result(key, envelope.snapshotHash(), envelope.snapshot(), true);
@@ -43,8 +44,9 @@ public final class ReplayableParseStage {
         DocumentParser parser = parserFactory.getParser(fileType);
         ParseSnapshot snapshot = ParseSnapshot.from(parser.parse(source));
         String snapshotHash = StableHash.sha256(encode(snapshot));
-        Envelope envelope = new Envelope(sourceHash, pipelineFingerprint,
+        Envelope envelope = new Envelope(ParseSnapshot.CURRENT_SCHEMA_VERSION,sourceHash,pipelineFingerprint,
                 snapshotHash, snapshot);
+        requireSupportedSchema(envelope);
         store.writeAtomically(key, encodeBytes(envelope));
         return new Result(key, snapshotHash, snapshot, false);
     }
@@ -83,8 +85,36 @@ public final class ReplayableParseStage {
         catch (Exception e) { throw new IllegalStateException("Cannot decode artifact", e); }
     }
 
+    /**
+     * 按 outputRef 重新读取并核验制品，返回完整 ParseSnapshot。
+     * Orchestrator 在重放已完成步骤时调用：StepExecutor 只返回摘要，
+     * 下一 Stage 需要真实对象。
+     */
+    public ParseSnapshot loadVerified(String outputRef,
+                                      String sourceHash,
+                                      String pipelineFingerprint) {
+        Envelope envelope = decode(store.read(outputRef));
+        requireSupportedSchema(envelope);
+        requireSameInput(envelope, sourceHash, pipelineFingerprint);
+        requireSnapshotDigest(envelope);
+        return envelope.snapshot();
+    }
+
+    private void requireSupportedSchema(Envelope envelope) {
+        if (envelope.schemaVersion() != ParseSnapshot.CURRENT_SCHEMA_VERSION) {
+            throw new IllegalStateException(
+                    "Unsupported parse artifact schema: "
+                            + envelope.schemaVersion());
+        }
+    }
+
     // Envelope 把源内容身份、管线身份、输出摘要和解析负载绑定在一起，重放时四项共同核验。
-    public record Envelope(String sourceHash, String pipelineFingerprint,
+    /**
+     * schemaVersion 约束 JSON 结构语义；
+     * sourceHash 和 pipelineFingerprint 约束输入身份；
+     * snapshotHash 约束输出没有损坏。
+     */
+    public record Envelope(int schemaVersion,String sourceHash, String pipelineFingerprint,
                            String snapshotHash, ParseSnapshot snapshot) { }
     // Result 把 Step 需要持久化的制品引用和摘要连同已核验快照返回给下游 Chunk Stage。
     public record Result(String artifactKey, String outputDigest,

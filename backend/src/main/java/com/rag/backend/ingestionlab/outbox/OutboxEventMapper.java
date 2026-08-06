@@ -43,14 +43,53 @@ public interface OutboxEventMapper {
               @Param("until") LocalDateTime until,
               @Param("expectedVersion") long expectedVersion);
 
-    // 只有当前 claimed_by 才能确认发布完成；重复派发由下游 jobId 幂等吸收。
+    /**
+     * 只有当前 Claim token 且租期未过，才能确认发布。
+     * expectedVersion 是 claim 成功后得到的 stateVersion，不是领取前的旧值。
+     */
     @Update("""
-        UPDATE outbox_events
-           SET status='PUBLISHED', published_at=#{now}, claimed_by=NULL,
-               claim_until=NULL, state_version=state_version+1
-         WHERE event_id=#{eventId} AND status='CLAIMED' AND claimed_by=#{owner}
-        """)
-    int markPublished(@Param("eventId") String eventId,
-                      @Param("owner") String owner,
-                      @Param("now") LocalDateTime now);
+    UPDATE outbox_events
+       SET status = 'PUBLISHED',
+           published_at = #{now},
+           claimed_by = NULL,
+           claim_until = NULL,
+           state_version = state_version + 1
+     WHERE event_id = #{eventId}
+       AND status = 'CLAIMED'
+       AND claimed_by = #{owner}
+       AND claim_until >= #{now}
+       AND state_version = #{expectedVersion}
+    """)
+    int markPublished(
+            @Param("eventId") String eventId,
+            @Param("owner") String owner,
+            @Param("expectedVersion") long expectedVersion,
+            @Param("now") LocalDateTime now);
+
+    /**
+     * 派发失败时用同一个 Claim token 写回退避或死亡状态。
+     * dead=true 表示次数耗尽或永久错误，后续不再自动领取。
+     */
+    @Update("""
+    UPDATE outbox_events
+       SET status = CASE WHEN #{dead} THEN 'DEAD' ELSE 'NEW' END,
+           available_at = #{nextAvailableAt},
+           last_error_code = #{errorCode},
+           claimed_by = NULL,
+           claim_until = NULL,
+           state_version = state_version + 1
+     WHERE event_id = #{eventId}
+       AND status = 'CLAIMED'
+       AND claimed_by = #{owner}
+       AND claim_until >= #{now}
+       AND state_version = #{expectedVersion}
+    """)
+    int markRetry(
+            @Param("eventId") String eventId,
+            @Param("owner") String owner,
+            @Param("expectedVersion") long expectedVersion,
+            @Param("now") LocalDateTime now,
+            @Param("nextAvailableAt") LocalDateTime nextAvailableAt,
+            @Param("errorCode") String errorCode,
+            @Param("dead") boolean dead);
 }

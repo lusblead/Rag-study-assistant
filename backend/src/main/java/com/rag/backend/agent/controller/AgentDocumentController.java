@@ -1,7 +1,9 @@
 package com.rag.backend.agent.controller;
 
-import com.rag.backend.agent.ingest.AgentDocumentIngestService;
 import com.rag.backend.common.Result;
+import com.rag.backend.ingestionlab.application.IngestApplicationService;
+import com.rag.backend.ingestionlab.application.IngestSubmissionResponse;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -11,15 +13,17 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/agent/documents")
 // 提供文档入库相关的 Agent API。
 public class AgentDocumentController {
-    private final AgentDocumentIngestService ingestService;
+    private final IngestApplicationService ingestService;
 
-    public AgentDocumentController(AgentDocumentIngestService ingestService) {
+    public AgentDocumentController(IngestApplicationService ingestService) {
         this.ingestService = ingestService;
     }
 
     @PostMapping("/{documentId}/ingest")
-    public Result<Integer> ingest(@PathVariable Long documentId) {
-        int chunkCount = ingestService.ingestDocument(documentId);
-        return Result.ok(chunkCount);
+    public ResponseEntity<Result<IngestSubmissionResponse>> ingest(
+            @PathVariable Long documentId) {
+        var submission = ingestService.submit(documentId);
+        return ResponseEntity.accepted().body(
+                Result.ok(IngestSubmissionResponse.from(submission)));
     }
 }

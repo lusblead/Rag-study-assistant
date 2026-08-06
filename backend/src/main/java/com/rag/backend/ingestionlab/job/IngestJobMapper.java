@@ -1,13 +1,10 @@
 // 唯一键负责去重，owner/stateVersion/期限条件负责并发提交权。
 package com.rag.backend.ingestionlab.job;
 
-import org.apache.ibatis.annotations.Insert;
-import org.apache.ibatis.annotations.Mapper;
-import org.apache.ibatis.annotations.Param;
-import org.apache.ibatis.annotations.Select;
-import org.apache.ibatis.annotations.Update;
+import org.apache.ibatis.annotations.*;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Mapper
 // IngestJobMapper：数据访问契约，关键写入依赖唯一键或条件更新。
@@ -16,10 +13,10 @@ public interface IngestJobMapper {
     // 创建任务时固定为 QUEUED；同一 version+jobType 的唯一键裁决并发重复创建。
     @Insert("""
         INSERT INTO ingest_jobs
-        (job_id, document_version_id, job_type, state, attempt, max_attempts,
+        (job_id, document_id, document_version_id, job_type, state, attempt, max_attempts,
          next_run_at, state_version)
         VALUES
-        (#{jobId}, #{documentVersionId}, #{jobType}, 'QUEUED', 0,
+        (#{jobId}, #{documentId}, #{documentVersionId}, #{jobType}, 'QUEUED', 0,
          #{maxAttempts}, #{nextRunAt}, 0)
         """)
     int insert(IngestJob job);
@@ -36,6 +33,17 @@ public interface IngestJobMapper {
         """)
     IngestJob selectByVersionAndType(@Param("versionId") long versionId,
                                      @Param("jobType") String jobType);
+
+    @Select("""
+        SELECT * FROM ingest_jobs
+         WHERE document_id = #{documentId}
+           AND job_type = #{jobType}
+         ORDER BY created_at DESC
+         LIMIT 1
+        """)
+    IngestJob selectLatestByDocumentAndType(
+            @Param("documentId") long documentId,
+            @Param("jobType") String jobType);
 
     // 领取任务只有影响 1 行才成功：状态可领取、退避已到、未超重试且版本仍匹配。
     @Update("""
@@ -101,4 +109,44 @@ public interface IngestJobMapper {
                     @Param("detail") String detail,
                     @Param("nextRunAt") LocalDateTime nextRunAt,
                     @Param("now") LocalDateTime now);
+
+    /**
+     * 收口已经耗尽次数、却因为进程退出仍停在可等待状态的 Job。
+     * Poller 或 Reconciler 周期调用，并把影响行数记录为指标。
+     */
+    @Update("""
+    UPDATE ingest_jobs
+       SET state = 'FAILED',
+           error_code = 'RETRY_EXHAUSTED',
+           finished_at = #{now},
+           lease_owner = NULL,
+           lease_until = NULL,
+           state_version = state_version + 1
+     WHERE attempt >= max_attempts
+       AND (
+            state IN ('QUEUED', 'RETRY_WAIT')
+            OR (state = 'RUNNING' AND lease_until < #{now})
+       )
+    """)
+    int failExhausted(@Param("now") LocalDateTime now);
+
+    /**
+     * 扫描到期任务，作为 Outbox 兜底。
+     * 查询已到退避时间的 QUEUED/RETRY_WAIT，以及租约过期的 RUNNING。
+     */
+    @Select("""
+        SELECT job_id
+          FROM ingest_jobs
+         WHERE next_run_at <= #{now}
+           AND attempt < max_attempts
+           AND (
+                state IN ('QUEUED', 'RETRY_WAIT')
+                OR (state = 'RUNNING' AND lease_until < #{now})
+           )
+         ORDER BY next_run_at, job_id
+         LIMIT #{limit}
+        """)
+    List<String> findDueJobIds(
+            @Param("now") LocalDateTime now,
+            @Param("limit") int limit);
 }
