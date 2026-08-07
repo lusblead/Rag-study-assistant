@@ -87,6 +87,17 @@ public class IngestJobOrchestrator {
         this.leases = leases;
     }
 
+    /**
+     * 执行编排（前提：当前 Worker 已持有 Job Lease，由 IngestJobWorker.run 调用）。
+     *
+     * 过程：定位 Job/Version/Document 并校验身份 → 按版本状态机从断点恢复 →
+     *       需要时解析/切块/写向量 → 一致性校验 → 激活 → 回写 parse_status。
+     * 状态变化：Version.state 沿 BUILDING→PARSING→CHUNKING→EMBEDDING→INDEXING→
+     *           VERIFYING→READY→ACTIVE 迁移；Job.state 由外层 Worker 管理
+     *           （RUNNING→SUCCEEDED / RETRY_WAIT / FAILED）。
+     * Lease 契约：每个阶段边界前续租；续租失败抛 LeaseLostException，
+     *           当前 Worker 立即停止写入，由新 owner 从持久状态接管。
+     */
     public void runOwned(JobLeaseService.LeaseSession leaseSession) {
         JobLeaseService.Lease lease = leaseSession.current();
         IngestJob job = requireIngestJob(lease.jobId());
@@ -95,6 +106,10 @@ public class IngestJobOrchestrator {
         CourseDocument document = requireActiveDocument(version.getDocumentId());
         requireJobTargetsDocument(job, document);
 
+        // 第 1 步：身份校验。Job 必须是 INGEST 且指向该版本；Job/Version/Document
+        // 任一缺失、错配或文档非 ACTIVE，都直接失败，不进入执行。
+        // 第 2 步：恢复点检查。只有 RESUMABLE 集合内的状态允许续跑；
+        // FAILED/CANCELLED 等终态直接抛 UnsupportedResumeStateException。
         DocumentVersionState currentState = stateOf(version);
         if (!RESUMABLE.contains(currentState)) {
             throw new UnsupportedResumeStateException(versionId, currentState);
@@ -108,11 +123,16 @@ public class IngestJobOrchestrator {
             return;
         }
 
+        // 第 3 步：分支选择。BUILDING/PARSING/CHUNKING/EMBEDDING 需要构建产物，
+        // 其余状态（INDEXING/VERIFYING/READY）已有持久化清单，走下方复用分支。
         int processedCount;
         if (requiresBuildArtifacts(currentState)) {
             // 只有仍需 Parse/Chunk/Embedding 的状态才读取源文件与当前管线。
             // INDEXING、VERIFYING、READY 已有持久化清单，不应因源文件暂时不可读
             // 而重复前序昂贵步骤或阻断激活恢复。
+            // 第 4 步：重放身份校验。源文件路径、内容 hash、管线指纹任一变化，
+            // 都抛 SourceIdentityMismatchException / PipelineIdentityMismatchException，
+            // 拒绝"同一个 Version 换输入或换加工方式重放"。
             Path source = Path.of(document.getFilePath())
                     .toAbsolutePath().normalize();
             if (!Files.isRegularFile(source)) {
@@ -135,6 +155,8 @@ public class IngestJobOrchestrator {
                 throw new PipelineIdentityMismatchException(versionId);
             }
 
+            // 第 5 步：状态变化 BUILDING→PARSING（CAS 迁移，携带 state_version；
+            // 更新 0 行说明被其他 Worker 推进，抛 ConcurrentVersionChangeException）。
             if (stateOf(version) == DocumentVersionState.BUILDING) {
                 lease = leaseSession.renew();
                 requireActiveDocument(document.getId());
@@ -142,6 +164,8 @@ public class IngestJobOrchestrator {
                         versionId, DocumentVersionState.PARSING);
             }
 
+            // 第 6 步：PARSE 步骤（StepExecutor 幂等）。输入摘要=sha256(源hash|指纹)；
+            // 同输入且已 DONE 直接复用落盘产物，不重复解析；新执行成功后才提交产物引用与摘要。
             String parseInputDigest = StableHash.sha256(
                     sourceHash + "|" + pipelineFingerprint);
             lease = leaseSession.renew();
@@ -159,6 +183,8 @@ public class IngestJobOrchestrator {
                                 result.snapshot().document().pages().size(),
                                 result.replayed());
                     });
+            // 第 7 步：状态变化 PARSING→CHUNKING；随后加载经源 hash+指纹校验的解析快照，
+            // 作为 CHUNK 步骤的输入（前一级输出摘要参与下一级输入摘要，形成链条）。
             lease = leaseSession.renew();
             version = requireVersion(versionId);
             if (stateOf(version) == DocumentVersionState.PARSING) {
@@ -170,6 +196,8 @@ public class IngestJobOrchestrator {
             ParseSnapshot snapshot = parseStage.loadVerified(
                     parseResult.outputRef(), sourceHash, pipelineFingerprint);
             String parseDigest = parseResult.outputDigest();
+            // 第 8 步：CHUNK 步骤（幂等）。输入摘要=sha256(解析输出digest|指纹)；
+            // 产物含切片参数（chunkSize/chunkOverlap），同输入复用，否则重新切块。
             String chunkInputDigest = StableHash.sha256(
                     parseDigest + "|" + pipelineFingerprint);
             requireActiveDocument(document.getId());
@@ -186,33 +214,33 @@ public class IngestJobOrchestrator {
                                 result.artifactKey(), result.outputDigest(),
                                 result.chunks().size(), result.replayed());
                     });
+            // 第 9 步：固化 expected_chunk_count 并迁移 CHUNKING→EMBEDDING。
+            // 数量与同一版本绑定：重复出现不同数量会拒绝，防止重放漂移。
             lease = leaseSession.renew();
             version = requireVersion(versionId);
             version = persistExpectedCount(
                     version, chunkResult.processedCount());
             if (stateOf(version) == DocumentVersionState.CHUNKING) {
-                version = transitions.transition(
-                        versionId, DocumentVersionState.EMBEDDING);
+                version = transitions.transition(versionId, DocumentVersionState.EMBEDDING);
             }
             requireAtLeast(version, DocumentVersionState.EMBEDDING);
 
-            List<ReplayableChunkStage.ChunkSnapshot> chunks =
-                    chunkStage.loadVerified(
-                            chunkResult.outputRef(), parseDigest,
-                            pipelineFingerprint);
+            List<ReplayableChunkStage.ChunkSnapshot> chunks = chunkStage.loadVerified(chunkResult.outputRef(), parseDigest,pipelineFingerprint);
             version = requireVersion(versionId);
+            // 第 10 步：写向量阶段。逐 chunk 调 VectorWriteStage：MySQL 建行并预留
+            // 确定性 vector_id → 查 Milvus（已有且身份匹配则跳过）→ upsert → markDone。
+            // 每次远程调用后重新确认文档仍 ACTIVE，防止写向量期间文档被删除。
             if (stateOf(version) == DocumentVersionState.EMBEDDING) {
                 for (ReplayableChunkStage.ChunkSnapshot chunk : chunks) {
                     lease = leaseSession.renew();
                     requireActiveDocument(document.getId());
-                    vectorWriteStage.write(
-                            toDraft(document, versionId, chunk));
+                    vectorWriteStage.write(toDraft(document, versionId, chunk));
                     // 远端调用期间可能刚好发生删除；再次检查可阻止后续写入和激活。
                     requireActiveDocument(document.getId());
                 }
+                // 第 11 步：状态变化 EMBEDDING→INDEXING（全部 chunk DONE 之后）。
                 lease = leaseSession.renew();
-                version = transitions.transition(
-                        versionId, DocumentVersionState.INDEXING);
+                version = transitions.transition(versionId, DocumentVersionState.INDEXING);
             }
             requireAtLeast(version, DocumentVersionState.INDEXING);
             processedCount = chunkResult.processedCount();
@@ -221,24 +249,28 @@ public class IngestJobOrchestrator {
             processedCount = requireExpectedCount(version);
         }
 
+        // 第 12 步：一致性校验。INDEXING→VERIFYING 在 VerificationService 内迁移；
+        // 对账 MySQL 期望清单 vs Milvus 实际清单，missing/orphan 任一非空即
+        // 抛 InconsistentIndexException，版本进 INCONSISTENT，绝不激活。
         version = requireVersion(versionId);
-        if (stateOf(version) == DocumentVersionState.INDEXING
-                || stateOf(version) == DocumentVersionState.VERIFYING) {
+        if (stateOf(version) == DocumentVersionState.INDEXING || stateOf(version) == DocumentVersionState.VERIFYING) {
             lease = leaseSession.renew();
             requireActiveDocument(document.getId());
-            IndexVerifier.VerificationReport report =
-                    verificationService.verify(versionId);
-            if (!report.passed()) {
-                throw new InconsistentIndexException(versionId);
-            }
+            IndexVerifier.VerificationReport report = verificationService.verify(versionId);
+            if (!report.passed()) {throw new InconsistentIndexException(versionId);}
+
             version = requireVersion(versionId);
         }
 
+        // 第 13 步：状态变化 READY→ACTIVE（单事务：锁 Document、切 active 指针、
+        // 旧版本 SUPERSEDED）。此阶段只重放激活，不重建任何产物。
         if (stateOf(version) == DocumentVersionState.READY) {
             lease = leaseSession.renew();
             requireActiveDocument(document.getId());
             versionActivationService.activate(document.getId(), versionId);
         }
+        // 第 14 步：确认 ACTIVE 后回写 documents.parse_status=PARSED，
+        // 由外层 IngestJobWorker 将 Job 提交为 SUCCEEDED。
         version = requireVersion(versionId);
         if (stateOf(version) != DocumentVersionState.ACTIVE) {
             throw new UnsupportedResumeStateException(
