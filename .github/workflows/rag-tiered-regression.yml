@@ -1,0 +1,187 @@
+name: RAG Tiered Regression
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/rag-tiered-regression.yml"
+      - "backend/evals/ci/**"
+      - "backend/evals/scripts/tiered_regression_gate.py"
+      - "backend/evals/scripts/tests/test_tiered_regression_gate.py"
+      - "backend/evals/datasets/rag-retrieval-smoke-v1/**"
+      - "backend/src/main/java/com/rag/backend/agent/**"
+      - "backend/src/test/java/com/rag/backend/agent/evaluation/**"
+      - "backend/src/test/java/com/rag/backend/agent/retrieval/eval/RagRetrievalSmokeEvalTest.java"
+      - "backend/pom.xml"
+      - "pom.xml"
+  workflow_dispatch:
+    inputs:
+      tier:
+        description: "Manual safety boundary to exercise"
+        required: true
+        type: choice
+        options:
+          - scheduled
+          - milestone
+
+permissions:
+  contents: read
+
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+
+jobs:
+  pr-deterministic:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Verify the comparator contract
+        run: python -B -X utf8 -m unittest backend.evals.scripts.tests.test_tiered_regression_gate
+      - name: Verify Metrics Core and architecture
+        run: >-
+          mvn --batch-mode -pl backend
+          '-Dtest=RetrievalMetricsCalculatorTest,RetrievalMetricsCoreArchitectureTest'
+          '-Dsurefire.failIfNoSpecifiedTests=true' test
+      - name: Produce the credential-free offline candidate
+        run: >-
+          mvn --batch-mode -pl backend
+          '-Dtest=RagRetrievalSmokeEvalTest'
+          '-Dsurefire.failIfNoSpecifiedTests=true'
+          "-Drag.eval.output=${RUNNER_TEMP}/rag-step45-pr-candidate.json"
+          "-Drag.eval.codeRevision=${GITHUB_SHA}"
+          "-Drag.eval.worktreeFingerprint=${GITHUB_SHA}"
+          test
+      - name: Compare the frozen engineering fixture
+        run: >-
+          python -B -X utf8 backend/evals/scripts/tiered_regression_gate.py
+          --baseline backend/evals/ci/baselines/rag-retrieval-smoke-v1.json
+          --candidate "${RUNNER_TEMP}/rag-step45-pr-candidate.json"
+          --policy backend/evals/ci/pr-deterministic-policy.json
+          --output "${RUNNER_TEMP}/rag-step45-pr-result.json"
+      - name: Emit the aggregate-only diff
+        if: always()
+        run: |
+          if [ -f "${RUNNER_TEMP}/rag-step45-pr-result.json" ]; then
+            python -B -m json.tool "${RUNNER_TEMP}/rag-step45-pr-result.json"
+          fi
+
+  scheduled-preparation:
+    if: github.event_name == 'workflow_dispatch' && inputs.tier == 'scheduled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Confirm the existing keyless fixture-smoke entrypoint
+        run: test -f backend/evals/scripts/run_retrieval_fixture_smoke.ps1
+      - name: Stop at the unconfigured business-policy boundary
+        shell: bash
+        run: |
+          result="${RUNNER_TEMP}/rag-step45-scheduled-deferred.json"
+          set +e
+          python -B -X utf8 backend/evals/scripts/tiered_regression_gate.py \
+            --baseline backend/evals/ci/baselines/rag-retrieval-smoke-v1.json \
+            --candidate backend/evals/ci/baselines/rag-retrieval-smoke-v1.json \
+            --policy backend/evals/ci/retrieval-business-policy.example.json \
+            --output "$result"
+          code=$?
+          set -e
+          if [ "$code" -ne 5 ]; then
+            exit "$code"
+          fi
+          python -B -X utf8 - "$result" <<'PY'
+          import json
+          import sys
+
+          expected_owner_fields = [
+              "artifactCostBudget",
+              "artifactRetentionDays",
+              "branchProtectionCheckNames",
+              "businessCriticalCaseIds",
+              "businessMetricThresholds",
+              "milestoneRef",
+              "milestoneTest55Authorization",
+              "milestoneTrigger",
+              "scheduledCron",
+          ]
+          with open(sys.argv[1], encoding="utf-8") as stream:
+              payload = json.load(stream)
+          policy = payload.get("policy") if isinstance(payload, dict) else None
+          if (
+              not isinstance(payload, dict)
+              or payload.get("schema") != "rag-tiered-regression-result/v1"
+              or payload.get("verdict") != "OWNER_DECISION_DEFERRED"
+              or payload.get("exitCode") != 5
+              or not isinstance(policy, dict)
+              or policy.get("configured") is not False
+              or payload.get("ownerDecisionDeferred") != expected_owner_fields
+          ):
+              raise SystemExit("invalid OWNER_DECISION_DEFERRED result")
+          PY
+          exit 5
+
+  milestone-boundary:
+    if: github.event_name == 'workflow_dispatch' && inputs.tier == 'milestone'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Stop before any frozen release-suite execution
+        shell: bash
+        run: |
+          result="${RUNNER_TEMP}/rag-step45-milestone-deferred.json"
+          set +e
+          python -B -X utf8 backend/evals/scripts/tiered_regression_gate.py \
+            --baseline backend/evals/ci/baselines/rag-retrieval-smoke-v1.json \
+            --candidate backend/evals/ci/baselines/rag-retrieval-smoke-v1.json \
+            --policy backend/evals/ci/retrieval-business-policy.example.json \
+            --output "$result"
+          code=$?
+          set -e
+          if [ "$code" -ne 5 ]; then
+            exit "$code"
+          fi
+          python -B -X utf8 - "$result" <<'PY'
+          import json
+          import sys
+
+          expected_owner_fields = [
+              "artifactCostBudget",
+              "artifactRetentionDays",
+              "branchProtectionCheckNames",
+              "businessCriticalCaseIds",
+              "businessMetricThresholds",
+              "milestoneRef",
+              "milestoneTest55Authorization",
+              "milestoneTrigger",
+              "scheduledCron",
+          ]
+          with open(sys.argv[1], encoding="utf-8") as stream:
+              payload = json.load(stream)
+          policy = payload.get("policy") if isinstance(payload, dict) else None
+          if (
+              not isinstance(payload, dict)
+              or payload.get("schema") != "rag-tiered-regression-result/v1"
+              or payload.get("verdict") != "OWNER_DECISION_DEFERRED"
+              or payload.get("exitCode") != 5
+              or not isinstance(policy, dict)
+              or policy.get("configured") is not False
+              or payload.get("ownerDecisionDeferred") != expected_owner_fields
+          ):
+              raise SystemExit("invalid OWNER_DECISION_DEFERRED result")
+          PY
+          exit 5

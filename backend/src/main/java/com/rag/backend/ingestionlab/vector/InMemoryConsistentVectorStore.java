@@ -5,6 +5,7 @@ import com.rag.backend.ingestionlab.retrieval.VersionedVectorSearch;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -25,6 +26,18 @@ public class InMemoryConsistentVectorStore
     @Override
     public void upsert(VectorRecord record) {
         vectors.put(record.vectorId(), new StoredVector(record));
+    }
+
+    @Override
+    public void awaitVersionVisible(long documentVersionId,
+                                    int expectedCount,
+                                    Duration timeout) {
+        if (expectedCount < 0 || timeout == null || timeout.isZero()
+                || timeout.isNegative()) {
+            throw new IllegalArgumentException(
+                    "Expected count must be non-negative and timeout positive");
+        }
+        // ConcurrentHashMap 写入立即可见；完整性差异由后续 IndexVerifier 判定。
     }
 
     @Override

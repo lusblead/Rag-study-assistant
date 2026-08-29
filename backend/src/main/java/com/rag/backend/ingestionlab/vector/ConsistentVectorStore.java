@@ -1,6 +1,7 @@
 // 用确定性 ID 让 MySQL 与向量库在重放后收敛。
 package com.rag.backend.ingestionlab.vector;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -8,6 +9,9 @@ import java.util.Set;
 // ConsistentVectorStore 让 Stage 指定确定性主键，并给 Verifier/Reconciler 提供按 Version 核验与删除能力。
 public interface ConsistentVectorStore {
     void upsert(VectorRecord record);
+    void awaitVersionVisible(long documentVersionId,
+                             int expectedCount,
+                             Duration timeout);
     Optional<VectorMetadata> find(long vectorId);
     long countByVersion(long documentVersionId);
     Set<Long> listIdsByVersion(long documentVersionId);

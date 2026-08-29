@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 @Component
 // 按固定窗口将清洗后的文本切分为可入库的知识片段，优先保留 Markdown 结构和页码来源。
@@ -23,6 +24,8 @@ public class FixedWindowTextChunker implements TextChunker {
 
     @Override
     public List<TextChunk> chunk(ParsedDocument document, int chunkSize, int overlap) {
+        Objects.requireNonNull(document, "document");
+        validateProfile(chunkSize, overlap);
         List<TextChunk> chunks = new ArrayList<>();
         int index = 0;
 
@@ -37,6 +40,16 @@ public class FixedWindowTextChunker implements TextChunker {
             appendChunks(chunks, index, document.title(), preferredDocumentContent(document), null, chunkSize, overlap);
         }
         return chunks;
+    }
+
+    private static void validateProfile(int chunkSize, int overlap) {
+        if (chunkSize <= 0) {
+            throw new IllegalArgumentException("chunkSize must be > 0");
+        }
+        if (overlap < 0 || overlap >= chunkSize) {
+            throw new IllegalArgumentException(
+                    "overlap must be >= 0 and < chunkSize");
+        }
     }
 
     private int appendChunks(List<TextChunk> chunks,

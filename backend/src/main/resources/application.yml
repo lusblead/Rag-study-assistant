@@ -10,7 +10,7 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/rag_study_assistant?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&createDatabaseIfNotExist=true}
     username: ${MYSQL_USER:root}
-    password: ${MYSQL_PASSWORD:root}
+    password: ${MYSQL_PASSWORD:}
 
   sql:
     init:
@@ -42,6 +42,11 @@ milvus:
 
 # 方案三第 07 章：新 collection，主键为应用计算的确定性 vectorId。
 ingestion:
+  chunk:
+    fixed-window:
+      # Step 4.2 实验候选；默认值保持现有 800/120 基线，并进入 pipeline fingerprint。
+      size: ${INGESTION_CHUNK_SIZE:800}
+      overlap: ${INGESTION_CHUNK_OVERLAP:120}
   artifact:
     # 解析与切块制品必须位于受控根目录；删除 Saga 只按 version 前缀清理。
     dir: ${INGESTION_ARTIFACT_DIR:${APP_UPLOAD_DIR:./uploads}/.ingestion-artifacts}
@@ -54,15 +59,68 @@ ingestion:
     collection-name: ${INGESTION_MILVUS_COLLECTION:knowledge_chunk_vectors_ingestion_v2}
     # 生产保持 AUTOINDEX；公开效果评测通过独立参数使用 FLAT 精确索引。
     index-type: ${INGESTION_MILVUS_INDEX_TYPE:AUTOINDEX}
+    # SDK 单次 RPC 和完整批次写后可见性都必须有界，并短于默认 Job Lease。
+    rpc-deadline-ms: ${INGESTION_MILVUS_RPC_DEADLINE_MS:30000}
+    visibility-timeout: ${INGESTION_MILVUS_VISIBILITY_TIMEOUT:PT30S}
 
 vector:
   provider: ${VECTOR_PROVIDER:milvus}
 
 rag:
   top-k: ${RAG_TOP_K:5}
+  # 每个召回源独立取候选；未单独配置时兼容旧 RAG_CANDIDATE_K。
+  source-k:
+    dense: ${RAG_DENSE_SOURCE_K:${RAG_CANDIDATE_K:20}}
+    lexical: ${RAG_LEXICAL_SOURCE_K:${RAG_CANDIDATE_K:20}}
+  # RRF/单源回退后、Rerank 前的全局冻结边界；必须 >= top-k。
   candidate-k: ${RAG_CANDIDATE_K:20}
   similarity-threshold: ${RAG_SIMILARITY_THRESHOLD:0.2}
   history-limit: ${RAG_HISTORY_LIMIT:8}
+  hybrid:
+    # 默认自动启用；故障处置时可显式设为 false 回退 Dense-only。
+    enabled: ${RAG_HYBRID_ENABLED:true}
+    rrf-k: ${RAG_HYBRID_RRF_K:60}
+    dense-weight: ${RAG_HYBRID_DENSE_WEIGHT:1.0}
+    lexical-weight: ${RAG_HYBRID_LEXICAL_WEIGHT:1.0}
+  diversity:
+    mmr:
+      # Step 4.1 实验候选；没有 Hybrid Dev45 证据前默认关闭。
+      enabled: ${RAG_MMR_ENABLED:false}
+      # 0.7 只是可回退的实验起点，不是已校准最优值。
+      lambda: ${RAG_MMR_LAMBDA:0.7}
+      similarity: ${RAG_MMR_SIMILARITY:jaccard-token-v1}
+  evidence-decision:
+    # 生成前执行 ANSWER / CLARIFY / REFUSE；false 仅兼容非空候选的旧行为，空证据仍禁止生成。
+    enabled: ${RAG_EVIDENCE_DECISION_ENABLED:true}
+    thresholds:
+      # 不同分数来源不可直接比较。门槛只在独立 Dev 数据校准后逐项开启。
+      remote-rerank:
+        enabled: ${RAG_EVIDENCE_REMOTE_RERANK_THRESHOLD_ENABLED:false}
+        min-score: ${RAG_EVIDENCE_REMOTE_RERANK_MIN_SCORE:0.0}
+        calibration-id: ${RAG_EVIDENCE_REMOTE_RERANK_CALIBRATION_ID:}
+      local-rerank:
+        enabled: ${RAG_EVIDENCE_LOCAL_RERANK_THRESHOLD_ENABLED:false}
+        min-score: ${RAG_EVIDENCE_LOCAL_RERANK_MIN_SCORE:0.0}
+        calibration-id: ${RAG_EVIDENCE_LOCAL_RERANK_CALIBRATION_ID:}
+      fusion:
+        enabled: ${RAG_EVIDENCE_FUSION_THRESHOLD_ENABLED:false}
+        min-score: ${RAG_EVIDENCE_FUSION_MIN_SCORE:0.0}
+        calibration-id: ${RAG_EVIDENCE_FUSION_CALIBRATION_ID:}
+      dense:
+        enabled: ${RAG_EVIDENCE_DENSE_THRESHOLD_ENABLED:false}
+        min-score: ${RAG_EVIDENCE_DENSE_MIN_SCORE:0.0}
+        calibration-id: ${RAG_EVIDENCE_DENSE_CALIBRATION_ID:}
+      lexical:
+        enabled: ${RAG_EVIDENCE_LEXICAL_THRESHOLD_ENABLED:false}
+        min-score: ${RAG_EVIDENCE_LEXICAL_MIN_SCORE:0.0}
+        calibration-id: ${RAG_EVIDENCE_LEXICAL_CALIBRATION_ID:}
+      legacy-final:
+        enabled: ${RAG_EVIDENCE_LEGACY_FINAL_THRESHOLD_ENABLED:false}
+        min-score: ${RAG_EVIDENCE_LEGACY_FINAL_MIN_SCORE:0.0}
+        calibration-id: ${RAG_EVIDENCE_LEGACY_FINAL_CALIBRATION_ID:}
+  grounding:
+    # 生成后严格校验会缓冲完整回答并最多修复一次；人工 Dev 集校准前默认关闭。
+    enabled: ${RAG_GROUNDING_ENABLED:false}
 
 rerank:
   provider: ${RERANK_PROVIDER:local}
@@ -76,6 +134,20 @@ rerank:
   local:
     vector-weight: ${RERANK_LOCAL_VECTOR_WEIGHT:0.7}
     lexical-weight: ${RERANK_LOCAL_LEXICAL_WEIGHT:0.3}
+  threshold:
+    # 数值只在对应开关开启后生效；默认关闭，避免冒充 Dev45 已校准参数。
+    remote:
+      enabled: ${RERANK_REMOTE_THRESHOLD_ENABLED:false}
+      min-score: ${RERANK_REMOTE_THRESHOLD_MIN_SCORE:0.0}
+    local:
+      enabled: ${RERANK_LOCAL_THRESHOLD_ENABLED:false}
+      min-score: ${RERANK_LOCAL_THRESHOLD_MIN_SCORE:0.0}
+  composite:
+    # 0.5/0.5 只是默认关闭时的可调试占位，不是生产最优权重结论。
+    enabled: ${RERANK_COMPOSITE_ENABLED:false}
+    version: ${RERANK_COMPOSITE_VERSION:normalized-min-max-v1}
+    base-weight: ${RERANK_COMPOSITE_BASE_WEIGHT:0.5}
+    rerank-weight: ${RERANK_COMPOSITE_RERANK_WEIGHT:0.5}
 
 agent:
   # false 使用配置的生产型 Provider；默认装配 Milvus 与 OpenAI-compatible Embedding/Chat 客户端。

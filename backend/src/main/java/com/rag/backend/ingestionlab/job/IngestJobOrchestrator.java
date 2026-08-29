@@ -15,13 +15,19 @@ import com.rag.backend.ingestionlab.state.DocumentVersionState;
 import com.rag.backend.ingestionlab.state.VersionTransitionService;
 import com.rag.backend.ingestionlab.step.StepExecutor;
 import com.rag.backend.ingestionlab.vector.ChunkWriteRepository;
+import com.rag.backend.ingestionlab.vector.ConsistentVectorStore;
+import com.rag.backend.ingestionlab.vector.VectorVisibilityTimeoutException;
 import com.rag.backend.ingestionlab.vector.VectorWriteStage;
 import com.rag.backend.ingestionlab.verify.IndexVerifier;
 import com.rag.backend.ingestionlab.verify.VerificationService;
+import com.rag.backend.observability.trace.TraceContextService;
+import com.rag.backend.observability.trace.TraceSpan;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
@@ -57,6 +63,9 @@ public class IngestJobOrchestrator {
     private final ChunkWriteRepository chunkWriteRepository;
     private final VersionTransitionService transitions;
     private final JobLeaseService leases;
+    private final ConsistentVectorStore vectors;
+    private final TraceContextService traces;
+    private final Duration vectorVisibilityTimeout;
 
     public IngestJobOrchestrator(
             ReplayableParseStage parseStage,
@@ -71,7 +80,17 @@ public class IngestJobOrchestrator {
             PipelineManifestProvider manifests,
             ChunkWriteRepository chunkWriteRepository,
             VersionTransitionService transitions,
-            JobLeaseService leases) {
+            JobLeaseService leases,
+            ConsistentVectorStore vectors,
+            TraceContextService traces,
+            @Value("${ingestion.milvus.visibility-timeout:PT30S}")
+            Duration vectorVisibilityTimeout) {
+        if (vectorVisibilityTimeout == null
+                || vectorVisibilityTimeout.isZero()
+                || vectorVisibilityTimeout.isNegative()) {
+            throw new IllegalArgumentException(
+                    "Vector visibility timeout must be positive");
+        }
         this.parseStage = parseStage;
         this.chunkStage = chunkStage;
         this.documentService = documentService;
@@ -85,6 +104,9 @@ public class IngestJobOrchestrator {
         this.chunkWriteRepository = chunkWriteRepository;
         this.transitions = transitions;
         this.leases = leases;
+        this.vectors = vectors;
+        this.traces = traces;
+        this.vectorVisibilityTimeout = vectorVisibilityTimeout;
     }
 
     /**
@@ -170,19 +192,29 @@ public class IngestJobOrchestrator {
                     sourceHash + "|" + pipelineFingerprint);
             lease = leaseSession.renew();
             requireActiveDocument(document.getId());
-            StepExecutor.StepResult parseResult = stepExecutor.run(
-                    lease,
-                    "PARSE",
-                    parseInputDigest,
-                    () -> {
-                        ReplayableParseStage.Result result = parseStage.execute(
-                                versionId, source, document.getFileType(),
-                                sourceHash, pipelineFingerprint);
-                        return new StepExecutor.StepResult(
-                                result.artifactKey(), result.outputDigest(),
-                                result.snapshot().document().pages().size(),
-                                result.replayed());
-                    });
+            StepExecutor.StepResult parseResult;
+            try (TraceSpan stage = traces.startSpan(
+                    "ingestion.stage.parse", job.getJobId())) {
+                try {
+                    parseResult = stepExecutor.run(
+                            lease,
+                            "PARSE",
+                            parseInputDigest,
+                            () -> {
+                                ReplayableParseStage.Result result = parseStage.execute(
+                                        versionId, source, document.getFileType(),
+                                        sourceHash, pipelineFingerprint);
+                                return new StepExecutor.StepResult(
+                                        result.artifactKey(), result.outputDigest(),
+                                        result.snapshot().document().pages().size(),
+                                        result.replayed());
+                            });
+                    stage.result(parseResult.replayed() ? "replayed" : "success");
+                } catch (RuntimeException | Error error) {
+                    markStageFailure(stage, error);
+                    throw error;
+                }
+            }
             // 第 7 步：状态变化 PARSING→CHUNKING；随后加载经源 hash+指纹校验的解析快照，
             // 作为 CHUNK 步骤的输入（前一级输出摘要参与下一级输入摘要，形成链条）。
             lease = leaseSession.renew();
@@ -201,19 +233,29 @@ public class IngestJobOrchestrator {
             String chunkInputDigest = StableHash.sha256(
                     parseDigest + "|" + pipelineFingerprint);
             requireActiveDocument(document.getId());
-            StepExecutor.StepResult chunkResult = stepExecutor.run(
-                    lease,
-                    "CHUNK",
-                    chunkInputDigest,
-                    () -> {
-                        ReplayableChunkStage.Result result = chunkStage.execute(
-                                versionId, snapshot, parseDigest,
-                                pipelineFingerprint, manifest.chunkSize(),
-                                manifest.chunkOverlap());
-                        return new StepExecutor.StepResult(
-                                result.artifactKey(), result.outputDigest(),
-                                result.chunks().size(), result.replayed());
-                    });
+            StepExecutor.StepResult chunkResult;
+            try (TraceSpan stage = traces.startSpan(
+                    "ingestion.stage.chunk", job.getJobId())) {
+                try {
+                    chunkResult = stepExecutor.run(
+                            lease,
+                            "CHUNK",
+                            chunkInputDigest,
+                            () -> {
+                                ReplayableChunkStage.Result result = chunkStage.execute(
+                                        versionId, snapshot, parseDigest,
+                                        pipelineFingerprint, manifest.chunkSize(),
+                                        manifest.chunkOverlap());
+                                return new StepExecutor.StepResult(
+                                        result.artifactKey(), result.outputDigest(),
+                                        result.chunks().size(), result.replayed());
+                            });
+                    stage.result(chunkResult.replayed() ? "replayed" : "success");
+                } catch (RuntimeException | Error error) {
+                    markStageFailure(stage, error);
+                    throw error;
+                }
+            }
             // 第 9 步：固化 expected_chunk_count 并迁移 CHUNKING→EMBEDDING。
             // 数量与同一版本绑定：重复出现不同数量会拒绝，防止重放漂移。
             lease = leaseSession.renew();
@@ -231,16 +273,26 @@ public class IngestJobOrchestrator {
             // 确定性 vector_id → 查 Milvus（已有且身份匹配则跳过）→ upsert → markDone。
             // 每次远程调用后重新确认文档仍 ACTIVE，防止写向量期间文档被删除。
             if (stateOf(version) == DocumentVersionState.EMBEDDING) {
-                for (ReplayableChunkStage.ChunkSnapshot chunk : chunks) {
-                    lease = leaseSession.renew();
-                    requireActiveDocument(document.getId());
-                    vectorWriteStage.write(toDraft(document, versionId, chunk));
-                    // 远端调用期间可能刚好发生删除；再次检查可阻止后续写入和激活。
-                    requireActiveDocument(document.getId());
+                try (TraceSpan stage = traces.startSpan(
+                        "ingestion.stage.embed_write", job.getJobId())) {
+                    try {
+                        for (ReplayableChunkStage.ChunkSnapshot chunk : chunks) {
+                            lease = leaseSession.renew();
+                            requireActiveDocument(document.getId());
+                            vectorWriteStage.write(toDraft(document, versionId, chunk));
+                            // 远端调用期间可能刚好发生删除；再次检查可阻止后续写入和激活。
+                            requireActiveDocument(document.getId());
+                        }
+                        // 第 11 步：状态变化 EMBEDDING→INDEXING（全部 chunk DONE 之后）。
+                        lease = leaseSession.renew();
+                        version = transitions.transition(
+                                versionId, DocumentVersionState.INDEXING);
+                        stage.result("success");
+                    } catch (RuntimeException | Error error) {
+                        markStageFailure(stage, error);
+                        throw error;
+                    }
                 }
-                // 第 11 步：状态变化 EMBEDDING→INDEXING（全部 chunk DONE 之后）。
-                lease = leaseSession.renew();
-                version = transitions.transition(versionId, DocumentVersionState.INDEXING);
             }
             requireAtLeast(version, DocumentVersionState.INDEXING);
             processedCount = chunkResult.processedCount();
@@ -249,25 +301,63 @@ public class IngestJobOrchestrator {
             processedCount = requireExpectedCount(version);
         }
 
-        // 第 12 步：一致性校验。INDEXING→VERIFYING 在 VerificationService 内迁移；
-        // 对账 MySQL 期望清单 vs Milvus 实际清单，missing/orphan 任一非空即
-        // 抛 InconsistentIndexException，版本进 INCONSISTENT，绝不激活。
+        // 第 12 步：先在完整批次边界等待 Milvus 达到可查询可见性，再做一致性校验。
+        // 屏障前后续租；超时由 Worker 按 TIMEOUT 持久重试，不生成假 INCONSISTENT。
+        // INDEXING→VERIFYING 在 VerificationService 内迁移；只有屏障通过后才对账
+        // MySQL 期望清单 vs Milvus 实际清单，missing/orphan 任一非空才进入 INCONSISTENT。
         version = requireVersion(versionId);
         if (stateOf(version) == DocumentVersionState.INDEXING || stateOf(version) == DocumentVersionState.VERIFYING) {
-            lease = leaseSession.renew();
-            requireActiveDocument(document.getId());
-            IndexVerifier.VerificationReport report = verificationService.verify(versionId);
-            if (!report.passed()) {throw new InconsistentIndexException(versionId);}
+            try (TraceSpan stage = traces.startSpan(
+                    "ingestion.stage.visibility", job.getJobId())) {
+                try {
+                    lease = leaseSession.renew();
+                    requireActiveDocument(document.getId());
+                    vectors.awaitVersionVisible(
+                            versionId,
+                            requireExpectedCount(version),
+                            vectorVisibilityTimeout);
+                    stage.result("success");
+                } catch (RuntimeException | Error error) {
+                    markStageFailure(stage, error);
+                    throw error;
+                }
+            }
 
-            version = requireVersion(versionId);
+            try (TraceSpan stage = traces.startSpan(
+                    "ingestion.stage.verify", job.getJobId())) {
+                try {
+                    lease = leaseSession.renew();
+                    requireActiveDocument(document.getId());
+                    IndexVerifier.VerificationReport report =
+                            verificationService.verify(versionId);
+                    if (!report.passed()) {
+                        throw new InconsistentIndexException(versionId);
+                    }
+
+                    version = requireVersion(versionId);
+                    stage.result("success");
+                } catch (RuntimeException | Error error) {
+                    markStageFailure(stage, error);
+                    throw error;
+                }
+            }
         }
 
         // 第 13 步：状态变化 READY→ACTIVE（单事务：锁 Document、切 active 指针、
         // 旧版本 SUPERSEDED）。此阶段只重放激活，不重建任何产物。
         if (stateOf(version) == DocumentVersionState.READY) {
-            lease = leaseSession.renew();
-            requireActiveDocument(document.getId());
-            versionActivationService.activate(document.getId(), versionId);
+            try (TraceSpan stage = traces.startSpan(
+                    "ingestion.stage.activate", job.getJobId())) {
+                try {
+                    lease = leaseSession.renew();
+                    requireActiveDocument(document.getId());
+                    versionActivationService.activate(document.getId(), versionId);
+                    stage.result("success");
+                } catch (RuntimeException | Error error) {
+                    markStageFailure(stage, error);
+                    throw error;
+                }
+            }
         }
         // 第 14 步：确认 ACTIVE 后回写 documents.parse_status=PARSED，
         // 由外层 IngestJobWorker 将 Job 提交为 SUCCEEDED。
@@ -281,6 +371,18 @@ public class IngestJobOrchestrator {
         documentService.updateParseStatus(
                 document.getId(), CourseDocument.STATUS_PARSED,
                 processedCount);
+    }
+
+    private void markStageFailure(TraceSpan stage, Throwable error) {
+        String result;
+        if (error instanceof JobLeaseService.LeaseLostException) {
+            result = "lease_lost";
+        } else if (error instanceof VectorVisibilityTimeoutException) {
+            result = "retry";
+        } else {
+            result = "failed";
+        }
+        stage.error(error).result(result);
     }
 
     private IngestJob requireIngestJob(String jobId) {

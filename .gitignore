@@ -24,6 +24,8 @@ Thumbs.db
 
 backend/docs/
 .agents/
+.claude/
+.context-relay/
 # 本地 AI 工程经验和 Obsidian 人类工程手册不属于产品源码。
 # `.agent/PROJECT_EXPERIENCE.md` 由工程学习流程维护；人类正文统一存放在仓库外的 Obsidian。
 .agent/
@@ -41,10 +43,24 @@ backend/evals/datasets/*
 !backend/evals/datasets/README.md
 !backend/evals/datasets/*.example.json
 !backend/evals/datasets/rag-retrieval-smoke-v1/
+!backend/evals/datasets/public-small-v1/
+!backend/evals/datasets/public-small-v1/**
 backend/evals/runs/
-backend/evals/reports/
+backend/evals/reports/*
+!backend/evals/reports/public-small-v1-no-rerank-vs-local-lexical.md
 # 仅忽略仓库根目录的旧 eval 数据目录；允许 backend/src/test/.../eval 下的评测 Java 类入库。
 /eval/
 docs/
+!docs/
+docs/*
+docs/acceptance/
+!docs/feature-flows/
+docs/feature-flows/*
+!docs/feature-flows/rag-public-small-offline-eval/
+!docs/feature-flows/rag-public-small-offline-eval/**
+!docs/feature-flows/rag-question-answer/
+!docs/feature-flows/rag-question-answer/**
+!docs/feature-flows/rag-layered-performance-baseline/
+!docs/feature-flows/rag-layered-performance-baseline/**
 *.zip
 __pycache__/

@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "test": "node --test src/markdown.test.mjs",
-    "build": "vue-tsc --noEmit -p tsconfig.json && vite build",
+    "test:build-boundary": "node --test scripts/vue-tsc-readonly.test.cjs",
+    "build": "node scripts/vue-tsc-readonly.cjs --noEmit -p tsconfig.json && vite build",
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {

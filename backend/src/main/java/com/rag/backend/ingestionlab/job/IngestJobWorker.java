@@ -6,6 +6,8 @@ import com.rag.backend.ingestionlab.outbox.DocumentVersionRow;
 import com.rag.backend.ingestionlab.state.DocumentVersionState;
 import com.rag.backend.ingestionlab.state.DocumentVersionStateMachine;
 import com.rag.backend.ingestionlab.vector.VectorFailureClassifier;
+import com.rag.backend.observability.trace.TraceContextService;
+import com.rag.backend.observability.trace.TraceSpan;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -20,25 +22,41 @@ public class IngestJobWorker {
     private final IngestJobOrchestrator orchestrator;
     private final IngestJobMapper jobs;
     private final DocumentVersionMapper versions;
+    private final TraceContextService traces;
     private final String owner;
 
     public IngestJobWorker(
             JobLeaseService leases,
             IngestJobOrchestrator orchestrator,
             IngestJobMapper jobs,
-            DocumentVersionMapper versions) {
+            DocumentVersionMapper versions,
+            TraceContextService traces) {
         this.leases = leases;
         this.orchestrator = orchestrator;
         this.jobs = jobs;
         this.versions = versions;
+        this.traces = traces;
         this.owner = "ingest-worker-" + UUID.randomUUID();
     }
 
     public void run(String jobId) {
+        try (TraceSpan span = traces.startSpan(
+                "ingestion.worker.attempt", jobId)) {
+            try {
+                runAttempt(jobId, span);
+            } catch (RuntimeException | Error error) {
+                span.error(error).result("failed");
+                throw error;
+            }
+        }
+    }
+
+    private void runAttempt(String jobId, TraceSpan span) {
         JobLeaseService.Lease lease;
         try {
             lease = leases.claim(jobId, owner);
-        } catch (JobLeaseService.LeaseNotAcquiredException ignored) {
+        } catch (JobLeaseService.LeaseNotAcquiredException notAcquired) {
+            span.result("lease_not_acquired");
             return;
         }
 
@@ -46,24 +64,34 @@ public class IngestJobWorker {
         try {
             orchestrator.runOwned(session);
             leases.succeed(session.current());
-        } catch (JobLeaseService.LeaseLostException ignored) {
+            span.result("success");
+        } catch (JobLeaseService.LeaseLostException leaseLost) {
             // 旧 owner 已无提交权；新 Worker 将从持久状态接管。
+            span.error(leaseLost).result("lease_lost");
         } catch (RuntimeException error) {
+            Failure failure = classify(error);
+            span.event("ingestion.worker.error", failure.code());
             try {
-                Failure failure = classify(error);
                 if (failure.permanent()) {
                     markVersionFailed(jobId, error, session.current());
                     leases.fail(session.current(), failure.code(),
                             safeDigest(error, failure.code()));
+                    span.error(error).result("failed");
                 } else {
-                    leases.retry(
+                    JobLeaseService.RetryOutcome retryOutcome = leases.retry(
                             session.current(),
                             failure.code(),
                             safeDigest(error, failure.code()),
                             failure.backoff());
+                    span.error(error).result(
+                            retryOutcome
+                                    == JobLeaseService.RetryOutcome.RETRY_EXHAUSTED
+                                    ? "retry_exhausted"
+                                    : "retry");
                 }
-            } catch (JobLeaseService.LeaseLostException ignored) {
+            } catch (JobLeaseService.LeaseLostException leaseLost) {
                 // 错误处理本身也受 Lease 约束；失去所有权后不再写 Version 或 Job。
+                span.error(leaseLost).result("lease_lost");
             }
         }
     }

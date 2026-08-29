@@ -1,14 +1,15 @@
 # RAG 评测（Rag-study-assistant）
 
-本目录存放评测脚本与数据集挂载说明。评测分为三条路径，边界必须严格区分。
+本目录存放评测脚本与数据集挂载说明。评测分为四条路径，边界必须严格区分。
 
-## 1. 三条评测路径
+## 1. 四条评测路径
 
 | 路径 | 数据来源 | API Key | 目标 | 是否可以代表真实效果 |
 |---|---|---|---|
 | A. Fixture Smoke | `backend/src/test/resources/eval-fixtures/retrieval-smoke/`（虚构技术文档 + 确定性预生成向量） | 不需要 | clone 后验证评测代码、Milvus、指标与报告链路可运行 | 否 |
 | B. Public T2 | `mteb/T2Retrieval` 固定 revision 子集（`prepare_t2_subset.py` 生成） | 需要 | 验证真实 Embedding 与 Milvus 链路，作为公共检索参考 | 仅子集参考，非官方全量 |
 | C. Local Obsidian | 外置私有 reviewed 数据集（`DatasetDir` 挂载 + Manifest/Checksum 校验） | 需要 | 受控业务检索评测 | 受控业务参考，非生产装配 |
+| D. Public Small A/B | `backend/evals/datasets/public-small-v1/`（原创中性虚构技术文本 + 固定向量） | 不需要 | 回归通用指标，并配对比较无 Rerank 与本地词法 Rerank | 否，仅固定离线组件样例 |
 
 ## 2. 必需软件
 
@@ -72,35 +73,57 @@
   [`datasets/local-obsidian-v3-reviewed.manifest.example.json`](datasets/local-obsidian-v3-reviewed.manifest.example.json)，
   挂载说明见 [`datasets/README.md`](datasets/README.md)。
 
-## 6. 哪些数据不会进入仓库
+## 6. D. Public Small A/B（无密钥、无 Docker）
+
+```powershell
+& 'backend\evals\scripts\run_public_small_retrieval_ab.ps1'
+```
+
+说明：
+
+- 数据集内容全部为原创中性虚构技术文本，采用固定 seed 和固定小维度向量；
+- 候选生成固定为内存精确余弦，按 score 降序、chunk ID 升序稳定排序；
+- A/B 使用完全相同的 corpus、cases、向量、候选 K、Top K 和 seed；唯一变量是
+  `NoOpKnowledgeReranker` 与 `LocalLexicalKnowledgeReranker(0.7,0.3)`；
+- 运行前校验 manifest、checksums、数量、ID/行排序、引用闭合与隐私门禁；
+- 报告固定输出到
+  `backend/evals/reports/public-small-v1-no-rerank-vs-local-lexical.md`；
+- 该报告只用于算法接线、指标和回归演示，不能解释为真实 Embedding、课程业务或生产效果。
+
+## 7. 哪些数据不会进入仓库
 
 - 私有 Obsidian Dataset（`backend/evals/datasets/*`，除 README 与 `*.example.json`）；
 - 运行报告（`backend/evals/runs/`）；
-- 汇总报告与 case 明细 CSV（`backend/evals/reports/`）；
+- 除固定 `public-small-v1` Markdown A/B 报告外的汇总报告与 case 明细
+  （`backend/evals/reports/`）；
 - Embedding 缓存（`.cache/`）；
 - 仓库根目录旧 `eval/` 数据目录与 `*.zip`。
 
 评测 Java 类（`LocalObsidianRetrievalEvalTest`、`PublicRetrievalEvalTest`、
 `RetrievalFixtureSmokeTest`、`EvalFixtureSupport`）与脚本会提交入库。
 
-## 7. 报告输出位置
+## 8. 报告输出位置
 
 - Fixture Smoke：`backend/evals/runs/<timestamp>-fixture-smoke.json`
 - Public T2：`backend/evals/runs/<timestamp>-<mode>-t2-public-bge-m3-milvus.json`
 - Local Obsidian：`backend/evals/runs/<timestamp>-<mode>-local-obsidian-v3-bge-m3-milvus.json`
+- Public Small A/B：`backend/evals/reports/public-small-v1-no-rerank-vs-local-lexical.md`
 
-报告均为不含密钥的 JSON；`providerUsage` 记录 request/retry/tokens，
-`configuration` 记录模型、索引类型、candidateK/topK、query mode。
+Fixture Smoke、Public T2 与 Local Obsidian 运行报告为不含密钥的 JSON；
+`providerUsage` 记录 request/retry/tokens，`configuration` 记录模型、索引类型、
+candidateK/topK、query mode。Public Small A/B 是固定 Markdown 报告，不应误写成 JSON。
 
-## 8. 当前指标边界
+## 9. 当前指标边界
 
 - Fixture Smoke：只证明链路可运行，指标无效果含义；
 - Public T2：当前为固定子集，候选集偏小，排序指标偏高，不能冒充官方全量；
 - Local Obsidian：`reviewed 100` 为受控业务检索集，审核者为 ChatGPT；
   不是完整 Golden RAG Dataset，也不能代表生产装配效果；
-- 三条路径都未评测 RAG 生成、引用、Grounding、拒答与端到端答案。
+- 四条路径都未评测 RAG 生成、引用、Grounding、拒答与端到端答案。
+- Public Small A/B 额外覆盖严格 Recall/MRR/nDCG、可替代证据、Source Coverage、
+  Required Evidence Group Coverage 和无答案误召回；这些数字仍只描述固定合成样例。
 
-## 9. 常见故障
+## 10. 常见故障
 
 | 故障 | 处理 |
 |---|---|
@@ -110,10 +133,37 @@
 | Dataset 缺失 | Public：先运行 `prepare_t2_subset.py`；Local：挂载外置目录并校验 manifest |
 | Checksum 不匹配 | 校验 manifest 的 SHA-256 与真实文件一致；拒绝执行 |
 | Milvus 未就绪 | 脚本等待 `/healthz` 90 秒；仍失败时查看 `docker compose logs` |
+| Public Small 隐私门禁失败 | 修正原创稳定输入；禁止对私有文本做字符串替换后重新生成 |
 
-## 10. 边界声明
+## 11. 边界声明
 
 - Fixture Smoke 不代表真实检索质量；
 - Public T2 固定子集不是官方全量成绩；
 - Local Obsidian 数据集不进入仓库；
 - 所有真实路径都要求 API Key，且 Key 不落盘、不进日志和报告。
+- Public Small A/B 不调用真实 Embedding/LLM，也不证明真实检索质量或生产验收。
+
+## 12. Dataset Quality 离线门禁
+
+```powershell
+python -X utf8 backend/evals/scripts/check_dataset_quality.py --profile public-small-v1 --dataset-dir backend/evals/datasets/public-small-v1 --output backend/evals/reports/2026-08-11-public-small-v1-data-quality-final-audit.json
+python -X utf8 backend/evals/scripts/check_dataset_quality.py --profile reviewed-local-v1 --dataset-dir <private-reviewed-dataset> --output backend/evals/reports/2026-08-11-local-reviewed-data-quality-final-audit.json
+```
+
+命令仅使用 Python 标准库并独占创建聚合 JSON 报告：`PASS` 返回 0，
+`REVIEW_REQUIRED`/`FAIL` 返回 2，操作错误返回 1。报告不含原始 query、content、
+来源路径或凭据值。`--human-reviewer` 必须按 exact reviewer 显式重复声明；字段名或
+reviewer 名称本身不会被推断为人工身份。Public Fixture 的 `PASS` 只代表仓库安全与
+结构契约通过，不代表业务标签或真实 RAG 质量通过。
+
+## 13. Step 4.4 分层性能工作流（默认只校验）
+
+性能工作流见 [`performance/README.md`](performance/README.md)。默认入口只校验推荐画像、
+JMeter XML 与报告 Schema，返回 `NOT_RUN / FIXTURE_STATIC`，不发 HTTP、不启动应用或依赖。
+真实执行还需 CLI 与 profile 双门、loopback、一次性数据、外部调用零增量成本的可验证计数器
+和独占输出目录；当前推荐 profile 故意保持不可执行。本工作流不生成 RAG 质量证据，也不得把
+局部并发外推成用户规模、生产容量或 SLA。
+
+**Phase 4.8 NO_PROVIDER 收尾边界（2026-08-27）：** 当前仅冻结 schema-v2 comparator contract 的既有审计证据，且本次未重跑；business schema-v2 baseline 与 Owner-policy binding 均为 `NOT_PRODUCED`，Dev45/Test55/Provider/真实 runtime performance 为 `NOT_RUN`，S4 为 `CANCELLED_NOT_RUN`。NO_PROVIDER 不消除 DB-key fallback，dirty checkout 也不能 claim clean B0；Owner/release/production acceptance 均未运行。完整的 resume-safe/prohibited claims 与 S2 请求见 [`../../docs/acceptance/runs/2026-08-27-RAG-RESUME-CLOSEOUT.md`](../../docs/acceptance/runs/2026-08-27-RAG-RESUME-CLOSEOUT.md)。
+
+**S5 收尾证据索引（2026-08-27）：** 状态为 `READY_FOR_S6 / Construction Claim / NO_VERDICT`；单一恢复入口见 [`../../docs/acceptance/runs/2026-08-27-RAG-RESUME-CLOSEOUT-EVIDENCE-INDEX.md`](../../docs/acceptance/runs/2026-08-27-RAG-RESUME-CLOSEOUT-EVIDENCE-INDEX.md)，fixture-only S3 报告见 [`reports/2026-08-27-public-small-v1-closeout.md`](reports/2026-08-27-public-small-v1-closeout.md)。S6 为 `QUEUED / NOT_STARTED`，索引本身不是审计结论。

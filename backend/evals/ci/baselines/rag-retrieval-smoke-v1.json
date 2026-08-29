@@ -1,0 +1,175 @@
+{
+  "aggregateOnly": true,
+  "baselineId": "rag-retrieval-smoke-v1",
+  "caseSetFingerprint": "sha256:a2cf4b5db2ff73889fe4ac660b1ae468edd65b4502f8df998577eea95e709e7b",
+  "cases": [
+    {
+      "answerability": "ANSWERABLE",
+      "caseId": "S01",
+      "inputFingerprint": "sha256:11651bc91b743dec6804ffb09a7cff0a35bea1d9abd993105c443ef9c9588080",
+      "metrics": {
+        "ndcgAt5": 0.0,
+        "recallAt1": 0.0,
+        "recallAt3": 0.0,
+        "recallAt5": 0.0,
+        "reciprocalRank": 0.0,
+        "staleVersionLeakCount": 0
+      }
+    },
+    {
+      "answerability": "ANSWERABLE",
+      "caseId": "S02",
+      "inputFingerprint": "sha256:48f35bbafd6a9421d73d97b97cf4e9a0928e67375a9830bbc649a6952256bbd7",
+      "metrics": {
+        "ndcgAt5": 0.0,
+        "recallAt1": 0.0,
+        "recallAt3": 0.0,
+        "recallAt5": 0.0,
+        "reciprocalRank": 0.0,
+        "staleVersionLeakCount": 0
+      }
+    },
+    {
+      "answerability": "ANSWERABLE",
+      "caseId": "S03",
+      "inputFingerprint": "sha256:0c980339ac2aa666825b7a5408bb27147fb57b8f027a1e36e6b88483e379a517",
+      "metrics": {
+        "ndcgAt5": 0.0,
+        "recallAt1": 0.0,
+        "recallAt3": 0.0,
+        "recallAt5": 0.0,
+        "reciprocalRank": 0.0,
+        "staleVersionLeakCount": 0
+      }
+    },
+    {
+      "answerability": "ANSWERABLE",
+      "caseId": "S04",
+      "inputFingerprint": "sha256:08c34b09ce9e59b20708e34bd8ef6e49483834e597ac67f1e79fff9a1efb1b31",
+      "metrics": {
+        "ndcgAt5": 1.0,
+        "recallAt1": 1.0,
+        "recallAt3": 1.0,
+        "recallAt5": 1.0,
+        "reciprocalRank": 1.0,
+        "staleVersionLeakCount": 0
+      }
+    },
+    {
+      "answerability": "ANSWERABLE",
+      "caseId": "S05",
+      "inputFingerprint": "sha256:863a4f40030ae6e47573ab8fc86f9344d9763e0e45e7d5269310a494e8506d59",
+      "metrics": {
+        "ndcgAt5": 1.0,
+        "recallAt1": 1.0,
+        "recallAt3": 1.0,
+        "recallAt5": 1.0,
+        "reciprocalRank": 1.0,
+        "staleVersionLeakCount": 0
+      }
+    },
+    {
+      "answerability": "ANSWERABLE",
+      "caseId": "S06",
+      "inputFingerprint": "sha256:9f3c402a72d5e660fd5ee8bfaae4e357a0229fa5f1ebc7e07ce3a83ed9d026ba",
+      "metrics": {
+        "ndcgAt5": 0.0,
+        "recallAt1": 0.0,
+        "recallAt3": 0.0,
+        "recallAt5": 0.0,
+        "reciprocalRank": 0.0,
+        "staleVersionLeakCount": 0
+      }
+    },
+    {
+      "answerability": "ANSWERABLE",
+      "caseId": "S07",
+      "inputFingerprint": "sha256:82f1e76d1481e3fd4185cae35b25f417d9a0adff1c4790c62e86f4d408fbb6f9",
+      "metrics": {
+        "ndcgAt5": 0.0,
+        "recallAt1": 0.0,
+        "recallAt3": 0.0,
+        "recallAt5": 0.0,
+        "reciprocalRank": 0.0,
+        "staleVersionLeakCount": 0
+      }
+    },
+    {
+      "answerability": "ANSWERABLE",
+      "caseId": "S08",
+      "inputFingerprint": "sha256:0a28a206d97ec745cdebea90c786579d497a8c40f55186c60d9bc989d21a7190",
+      "metrics": {
+        "ndcgAt5": 0.0,
+        "recallAt1": 0.0,
+        "recallAt3": 0.0,
+        "recallAt5": 0.0,
+        "reciprocalRank": 0.0,
+        "staleVersionLeakCount": 0
+      }
+    },
+    {
+      "answerability": "ANSWERABLE",
+      "caseId": "S09",
+      "inputFingerprint": "sha256:2949c12ceabcf0bdd90e0b0048d2d434f56f54dedca9cf51610e057b09d59378",
+      "metrics": {
+        "ndcgAt5": 0.0,
+        "recallAt1": 0.0,
+        "recallAt3": 0.0,
+        "recallAt5": 0.0,
+        "reciprocalRank": 0.0,
+        "staleVersionLeakCount": 0
+      }
+    },
+    {
+      "answerability": "ANSWERABLE",
+      "caseId": "S10",
+      "inputFingerprint": "sha256:d96a70c3e2e28e3b6681d73f08fb393f2ccca51d501510ca065cc5c7f8bce9ba",
+      "metrics": {
+        "ndcgAt5": 0.0,
+        "recallAt1": 0.0,
+        "recallAt3": 0.0,
+        "recallAt5": 0.0,
+        "reciprocalRank": 0.0,
+        "staleVersionLeakCount": 0
+      }
+    },
+    {
+      "answerability": "UNANSWERABLE",
+      "caseId": "S11",
+      "inputFingerprint": "sha256:db49394c260005d66ed7be8fa616066016d6947787b9ceed59af0d2c88fa7a9a",
+      "metrics": {
+        "returnedAnyChunk": true,
+        "staleVersionLeakCount": 0
+      }
+    },
+    {
+      "answerability": "UNANSWERABLE",
+      "caseId": "S12",
+      "inputFingerprint": "sha256:72606d274f8f6b63b7a85e64c99fee4f980a32f32173f429b81ab304c971eb76",
+      "metrics": {
+        "returnedAnyChunk": true,
+        "staleVersionLeakCount": 0
+      }
+    }
+  ],
+  "configurationFingerprint": "sha256:ba7014ad3ac7a6d96a037363deb0fa125d82e63dffed547cef795db6e8e14269",
+  "datasetInputFingerprint": "sha256:f2d87dc01b7b906cecdcdaf2b65bbfccb967ef84944a91c1ed50c712502813ff",
+  "datasetVersion": "rag-retrieval-smoke-v1",
+  "evaluationType": "OFFLINE_MOCK_RETRIEVAL_SMOKE",
+  "evidenceBoundary": "Synthetic deterministic fixture engineering baseline; not business or production quality.",
+  "overall": {
+    "answerableCaseCount": 10,
+    "caseCount": 12,
+    "mrr": 0.2,
+    "ndcgAt5": 0.2,
+    "noAnswerFalsePositiveRate": 1.0,
+    "recallAt1": 0.2,
+    "recallAt3": 0.2,
+    "recallAt5": 0.2,
+    "staleVersionLeakCount": 0,
+    "unanswerableCaseCount": 2
+  },
+  "rawSamplesIncluded": false,
+  "schema": "rag-tiered-regression-baseline/v1",
+  "sourceRevision": "c416a5178c133c24ee267ac014d0df200186c46e"
+}

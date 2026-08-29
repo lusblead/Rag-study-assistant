@@ -2,6 +2,12 @@ package com.rag.backend.agent.retrieval.eval;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rag.backend.agent.evaluation.Answerability;
+import com.rag.backend.agent.evaluation.CaseRetrievalMetrics;
+import com.rag.backend.agent.evaluation.RetrievalEvalReport;
+import com.rag.backend.agent.evaluation.RetrievalGroundTruth;
+import com.rag.backend.agent.evaluation.RetrievalMetricsAccumulator;
+import com.rag.backend.agent.evaluation.RetrievalMetricsCalculator;
 import com.rag.backend.agent.embedding.EmbeddingClient;
 import com.rag.backend.agent.model.KnowledgeChunk;
 import com.rag.backend.agent.repository.KnowledgeChunkRepository;
@@ -120,11 +126,15 @@ class RetrievalFixtureSmokeTest {
                 new LocalLexicalKnowledgeReranker(0.7, 0.3),
                 -1.0,
                 CANDIDATE_K);
+        RetrievalMetricsCalculator metricsCore = new RetrievalMetricsCalculator();
+        Map<Long, Long> sourceByChunkId = corpus.stream().collect(
+                java.util.stream.Collectors.toUnmodifiableMap(
+                        CorpusRow::chunkId, CorpusRow::documentId));
 
         try {
             // 同一 Milvus 快照下连跑两轮，验证返回列表与总体指标逐值一致。
-            Round first = runRound(cases, retriever);
-            Round second = runRound(cases, retriever);
+            Round first = runRound(cases, retriever, metricsCore, sourceByChunkId);
+            Round second = runRound(cases, retriever, metricsCore, sourceByChunkId);
             assertEquals(first.rankedByCase(), second.rankedByCase(),
                     "Smoke 两轮返回列表不一致");
             // 延迟受机器调度影响，不参与确定性一致性比较；质量指标必须逐值一致。
@@ -216,9 +226,12 @@ class RetrievalFixtureSmokeTest {
         }
     }
 
-    private Round runRound(List<SmokeCase> cases, MilvusKnowledgeRetriever retriever) {
+    private Round runRound(List<SmokeCase> cases,
+                           MilvusKnowledgeRetriever retriever,
+                           RetrievalMetricsCalculator metricsCore,
+                           Map<Long, Long> sourceByChunkId) {
         List<Map<String, Object>> caseReports = new ArrayList<>();
-        MetricBucket totals = new MetricBucket();
+        MetricBucket totals = new MetricBucket(metricsCore);
         Map<String, List<Long>> rankedByCase = new LinkedHashMap<>();
         for (SmokeCase evalCase : cases) {
             long started = System.nanoTime();
@@ -229,9 +242,15 @@ class RetrievalFixtureSmokeTest {
                     .map(RetrievedChunk::chunkId).toList();
             rankedByCase.put(evalCase.caseId(), rankedChunkIds);
 
-            Map<String, Object> metrics = metrics(
-                    rankedChunkIds, evalCase);
-            totals.add(evalCase, metrics, latencyMs);
+            RetrievalGroundTruth groundTruth = groundTruth(
+                    evalCase, sourceByChunkId);
+            Map<Integer, CaseRetrievalMetrics> canonicalMetrics = Map.of(
+                    1, metricsCore.evaluateCase(groundTruth, rankedChunkIds, 1),
+                    3, metricsCore.evaluateCase(groundTruth, rankedChunkIds, 3),
+                    5, metricsCore.evaluateCase(groundTruth, rankedChunkIds, 5),
+                    10, metricsCore.evaluateCase(groundTruth, rankedChunkIds, 10));
+            Map<String, Object> metrics = metrics(evalCase, canonicalMetrics);
+            totals.add(groundTruth, canonicalMetrics, metrics, latencyMs);
             Map<String, Object> caseReport = new LinkedHashMap<>();
             caseReport.put("caseId", evalCase.caseId());
             caseReport.put("question", evalCase.query());
@@ -255,32 +274,59 @@ class RetrievalFixtureSmokeTest {
         return Map.copyOf(result);
     }
 
-    private Map<String, Object> metrics(List<Long> ranked, SmokeCase evalCase) {
-        List<Long> relevant = evalCase.relevantChunkIds();
-        List<Long> acceptable = evalCase.acceptableChunkIds();
+    private Map<String, Object> metrics(
+            SmokeCase evalCase,
+            Map<Integer, CaseRetrievalMetrics> canonicalMetrics) {
         List<Long> confusing = evalCase.confusingChunkIds();
+        CaseRetrievalMetrics at10 = canonicalMetrics.get(10);
         Map<String, Object> metrics = new LinkedHashMap<>();
-        metrics.put("strictRecallAt1", recallAt(ranked, relevant, 1));
-        metrics.put("strictRecallAt3", recallAt(ranked, relevant, 3));
-        metrics.put("strictRecallAt5", recallAt(ranked, relevant, 5));
-        metrics.put("strictRecallAt10", recallAt(ranked, relevant, 10));
-        metrics.put("acceptableRecallAt5", recallAt(ranked, acceptable, 5));
-        metrics.put("acceptableRecallAt10", recallAt(ranked, acceptable, 10));
-        metrics.put("strictMrr", reciprocalRank(ranked, relevant));
-        metrics.put("acceptableMrr", reciprocalRank(ranked, acceptable));
-        metrics.put("strictNdcgAt10", ndcgAt(ranked, relevant, 10));
-        metrics.put("acceptableNdcgAt10", ndcgAt(ranked, acceptable, 10));
-        metrics.put("firstRelevantRank", firstRelevantRank(ranked, acceptable));
-        metrics.put("sourceCoverageAt10", sourceCoverage(
-                ranked, evalCase.sourceDocuments(), 10));
-        metrics.put("evidenceGroupCoverageAt10", evidenceGroupCoverage(
-                ranked, evalCase.relevantChunkIds(), 10));
-        metrics.put("misleadingRecall", misleadingRecall(ranked, confusing));
-        metrics.put("returnedAnyChunk", !ranked.isEmpty());
+        metrics.put("strictRecallAt1", canonicalMetrics.get(1).recallAtK());
+        metrics.put("strictRecallAt3", canonicalMetrics.get(3).recallAtK());
+        metrics.put("strictRecallAt5", canonicalMetrics.get(5).recallAtK());
+        metrics.put("strictRecallAt10", at10.recallAtK());
+        metrics.put("acceptableRecallAt5",
+                canonicalMetrics.get(5).acceptableRecallAtK());
+        metrics.put("acceptableRecallAt10", at10.acceptableRecallAtK());
+        metrics.put("strictMrr", at10.reciprocalRank());
+        metrics.put("acceptableMrr", at10.acceptableReciprocalRank());
+        metrics.put("strictNdcgAt10", at10.ndcgAtK());
+        metrics.put("acceptableNdcgAt10", at10.acceptableNdcgAtK());
+        metrics.put("firstRelevantRank", firstRelevantRank(
+                at10.rankedChunkIds(), evalCase.acceptableChunkIds()));
+        metrics.put("sourceCoverageAt10", at10.sourceCoverageAtK());
+        metrics.put("evidenceGroupCoverageAt10",
+                at10.requiredEvidenceGroupCoverageAtK());
+        metrics.put("misleadingRecall", misleadingRecall(
+                at10.rankedChunkIds(), confusing));
+        metrics.put("returnedAnyChunk", !at10.rankedChunkIds().isEmpty());
         metrics.put("unanswerablePrecision", evalCase.answerable()
                 ? -1.0
-                : (ranked.isEmpty() ? 1.0 : 0.0));
+                : (at10.unanswerableFalsePositive() > 0.0 ? 0.0 : 1.0));
         return metrics;
+    }
+
+    private RetrievalGroundTruth groundTruth(
+            SmokeCase evalCase,
+            Map<Long, Long> sourceByChunkId) {
+        Set<Long> relevant = Set.copyOf(evalCase.relevantChunkIds());
+        Set<Long> acceptable = Set.copyOf(evalCase.acceptableChunkIds());
+        List<Set<Long>> requiredGroups = relevant.stream()
+                .map(Set::of)
+                .toList();
+        Set<Long> requiredSources = evalCase.sourceDocuments().stream()
+                .map(this::documentIdOf)
+                .filter(id -> id >= 0)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        return new RetrievalGroundTruth(
+                evalCase.caseId(),
+                evalCase.answerable()
+                        ? Answerability.ANSWERABLE
+                        : Answerability.UNANSWERABLE,
+                relevant,
+                acceptable,
+                requiredGroups,
+                sourceByChunkId,
+                requiredSources);
     }
 
     private List<CorpusRow> readCorpus(Path path) throws IOException {
@@ -354,64 +400,11 @@ class RetrievalFixtureSmokeTest {
                 + expectedCount + ", actual=" + visibleCount);
     }
 
-    private double recallAt(List<Long> ranked, List<Long> relevant, int k) {
-        long hits = ranked.stream().limit(k).filter(relevant::contains).count();
-        return relevant.isEmpty() ? 0.0 : hits / (double) relevant.size();
-    }
-
-    private double reciprocalRank(List<Long> ranked, List<Long> relevant) {
-        for (int index = 0; index < ranked.size(); index++) {
-            if (relevant.contains(ranked.get(index))) return 1.0 / (index + 1.0);
-        }
-        return 0.0;
-    }
-
-    private double ndcgAt(List<Long> ranked, List<Long> relevant, int k) {
-        if (relevant.isEmpty()) return 0.0;
-        double dcg = 0.0;
-        for (int index = 0; index < Math.min(k, ranked.size()); index++) {
-            if (relevant.contains(ranked.get(index))) dcg += 1.0 / log2(index + 2.0);
-        }
-        double idcg = 0.0;
-        for (int index = 0; index < Math.min(k, relevant.size()); index++) {
-            idcg += 1.0 / log2(index + 2.0);
-        }
-        return idcg == 0.0 ? 0.0 : dcg / idcg;
-    }
-
     private double firstRelevantRank(List<Long> ranked, List<Long> relevant) {
         for (int index = 0; index < ranked.size(); index++) {
             if (relevant.contains(ranked.get(index))) return index + 1.0;
         }
         return 0.0;
-    }
-
-    private double sourceCoverage(
-            List<Long> rankedChunkIds,
-            List<String> requiredDocuments,
-            int k) {
-        if (requiredDocuments.isEmpty()) return 0.0;
-        // fixture 中 documentId 与 sourceDocument 一一对应；此处用 chunk 的 document 归属判断。
-        List<Long> topK = rankedChunkIds.stream().limit(k).toList();
-        Set<Long> covered = new LinkedHashSet<>();
-        for (long chunkId : topK) {
-            if (chunkId >= 1 && chunkId <= 4) covered.add(101L);
-            else if (chunkId >= 5 && chunkId <= 8) covered.add(102L);
-            else if (chunkId >= 9 && chunkId <= 12) covered.add(103L);
-        }
-        Set<Long> required = new LinkedHashSet<>();
-        requiredDocuments.forEach(doc -> required.add(documentIdOf(doc)));
-        if (required.isEmpty()) return 0.0;
-        long hit = covered.stream().filter(required::contains).count();
-        return hit / (double) required.size();
-    }
-
-    private double evidenceGroupCoverage(
-            List<Long> rankedChunkIds, List<Long> relevant, int k) {
-        if (relevant.isEmpty()) return 0.0;
-        List<Long> topK = rankedChunkIds.stream().limit(k).toList();
-        long hit = relevant.stream().filter(topK::contains).count();
-        return hit / (double) relevant.size();
     }
 
     private double misleadingRecall(List<Long> ranked, List<Long> confusing) {
@@ -426,10 +419,6 @@ class RetrievalFixtureSmokeTest {
             case "虚构缓存手册.md" -> 103L;
             default -> -1L;
         };
-    }
-
-    private double log2(double value) {
-        return Math.log(value) / Math.log(2.0);
     }
 
     private record CorpusRow(long chunkId, long documentId, String title, String content) {
@@ -471,88 +460,61 @@ class RetrievalFixtureSmokeTest {
     }
 
     private static final class MetricBucket {
-        private long count;
-        private double strictRecallAt1;
-        private double strictRecallAt3;
-        private double strictRecallAt5;
-        private double strictRecallAt10;
-        private double acceptableRecallAt5;
-        private double acceptableRecallAt10;
-        private double strictMrr;
-        private double acceptableMrr;
-        private double strictNdcgAt10;
-        private double acceptableNdcgAt10;
+        private final RetrievalMetricsCalculator metricsCore;
+        private final RetrievalMetricsAccumulator canonical =
+                new RetrievalMetricsAccumulator();
         private double firstRelevantRank;
-        private double sourceCoverageAt10;
-        private double evidenceGroupCoverageAt10;
         private double misleadingRecall;
-        private double unanswerablePrecisionSum;
-        private long unanswerableCount;
         private final List<Long> latencies = new ArrayList<>();
 
-        private void add(SmokeCase evalCase, Map<String, Object> metrics, long latencyMs) {
-            count++;
-            strictRecallAt1 += (double) metrics.get("strictRecallAt1");
-            strictRecallAt3 += (double) metrics.get("strictRecallAt3");
-            strictRecallAt5 += (double) metrics.get("strictRecallAt5");
-            strictRecallAt10 += (double) metrics.get("strictRecallAt10");
-            acceptableRecallAt5 += (double) metrics.get("acceptableRecallAt5");
-            acceptableRecallAt10 += (double) metrics.get("acceptableRecallAt10");
-            strictMrr += (double) metrics.get("strictMrr");
-            acceptableMrr += (double) metrics.get("acceptableMrr");
-            strictNdcgAt10 += (double) metrics.get("strictNdcgAt10");
-            acceptableNdcgAt10 += (double) metrics.get("acceptableNdcgAt10");
+        private MetricBucket(RetrievalMetricsCalculator metricsCore) {
+            this.metricsCore = metricsCore;
+        }
+
+        private void add(RetrievalGroundTruth groundTruth,
+                         Map<Integer, CaseRetrievalMetrics> canonicalMetrics,
+                         Map<String, Object> metrics,
+                         long latencyMs) {
+            canonical.add(groundTruth, canonicalMetrics);
             firstRelevantRank += (double) metrics.get("firstRelevantRank");
-            sourceCoverageAt10 += (double) metrics.get("sourceCoverageAt10");
-            evidenceGroupCoverageAt10 +=
-                    (double) metrics.get("evidenceGroupCoverageAt10");
             misleadingRecall += (double) metrics.get("misleadingRecall");
-            double unanswerablePrecision =
-                    (double) metrics.get("unanswerablePrecision");
-            if (unanswerablePrecision >= 0.0) {
-                unanswerablePrecisionSum += unanswerablePrecision;
-                unanswerableCount++;
-            }
             latencies.add(latencyMs);
         }
 
         private Map<String, Object> report() {
+            RetrievalEvalReport at1 = metricsCore.summarizeGroundTruth(
+                    canonical.groundTruths(), canonical.resultsAt(1), 1);
+            RetrievalEvalReport at3 = metricsCore.summarizeGroundTruth(
+                    canonical.groundTruths(), canonical.resultsAt(3), 3);
+            RetrievalEvalReport at5 = metricsCore.summarizeGroundTruth(
+                    canonical.groundTruths(), canonical.resultsAt(5), 5);
+            RetrievalEvalReport at10 = metricsCore.summarizeGroundTruth(
+                    canonical.groundTruths(), canonical.resultsAt(10), 10);
+            long count = canonical.size();
             List<Long> sorted = latencies.stream().sorted().toList();
             return Map.ofEntries(
                     Map.entry("caseCount", count),
-                    Map.entry("strictRecallAt1",
-                            count == 0 ? 0.0 : strictRecallAt1 / count),
-                    Map.entry("strictRecallAt3",
-                            count == 0 ? 0.0 : strictRecallAt3 / count),
-                    Map.entry("strictRecallAt5",
-                            count == 0 ? 0.0 : strictRecallAt5 / count),
-                    Map.entry("strictRecallAt10",
-                            count == 0 ? 0.0 : strictRecallAt10 / count),
-                    Map.entry("acceptableRecallAt5",
-                            count == 0 ? 0.0 : acceptableRecallAt5 / count),
-                    Map.entry("acceptableRecallAt10",
-                            count == 0 ? 0.0 : acceptableRecallAt10 / count),
-                    Map.entry("strictMrr",
-                            count == 0 ? 0.0 : strictMrr / count),
-                    Map.entry("acceptableMrr",
-                            count == 0 ? 0.0 : acceptableMrr / count),
-                    Map.entry("strictNdcgAt10",
-                            count == 0 ? 0.0 : strictNdcgAt10 / count),
-                    Map.entry("acceptableNdcgAt10",
-                            count == 0 ? 0.0 : acceptableNdcgAt10 / count),
+                    Map.entry("strictRecallAt1", at1.macroRecallAtK()),
+                    Map.entry("strictRecallAt3", at3.macroRecallAtK()),
+                    Map.entry("strictRecallAt5", at5.macroRecallAtK()),
+                    Map.entry("strictRecallAt10", at10.macroRecallAtK()),
+                    Map.entry("acceptableRecallAt5", at5.macroAcceptableRecallAtK()),
+                    Map.entry("acceptableRecallAt10", at10.macroAcceptableRecallAtK()),
+                    Map.entry("strictMrr", at10.meanReciprocalRank()),
+                    Map.entry("acceptableMrr", at10.meanAcceptableReciprocalRank()),
+                    Map.entry("strictNdcgAt10", at10.macroNdcgAtK()),
+                    Map.entry("acceptableNdcgAt10", at10.macroAcceptableNdcgAtK()),
                     Map.entry("firstRelevantRank",
                             count == 0 ? 0.0 : firstRelevantRank / count),
-                    Map.entry("sourceCoverageAt10",
-                            count == 0 ? 0.0 : sourceCoverageAt10 / count),
+                    Map.entry("sourceCoverageAt10", at10.macroSourceCoverageAtK()),
                     Map.entry("evidenceGroupCoverageAt10",
-                            count == 0 ? 0.0 : evidenceGroupCoverageAt10 / count),
+                            at10.macroRequiredEvidenceGroupCoverageAtK()),
                     Map.entry("misleadingRecall",
                             count == 0 ? 0.0 : misleadingRecall / count),
-                    Map.entry("unanswerableCaseCount", unanswerableCount),
+                    Map.entry("unanswerableCaseCount", at10.unanswerableCases()),
                     Map.entry("unanswerablePrecision",
-                            unanswerableCount == 0
-                                    ? -1.0
-                                    : unanswerablePrecisionSum / unanswerableCount),
+                            at10.unanswerableCases() == 0
+                                    ? -1.0 : at10.emptyRetrievalAccuracy()),
                     Map.entry("endToEndLatencyP50Ms", percentile(sorted, 0.50)),
                     Map.entry("endToEndLatencyP95Ms", percentile(sorted, 0.95)));
         }

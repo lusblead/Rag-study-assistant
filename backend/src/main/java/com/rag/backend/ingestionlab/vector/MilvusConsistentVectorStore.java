@@ -21,11 +21,14 @@ import io.milvus.v2.service.vector.response.QueryResp;
 import io.milvus.v2.service.utility.request.FlushReq;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Service
@@ -42,17 +45,33 @@ public class MilvusConsistentVectorStore
     private final IndexParam.IndexType indexType;
     private final Gson gson = new Gson();
 
+    public MilvusConsistentVectorStore(String host,
+                                       int port,
+                                       String collectionName,
+                                       int embeddingDimension,
+                                       String indexType) {
+        this(host, port, collectionName, embeddingDimension, indexType, 30_000L);
+    }
+
     // 从配置读取新 collection 名称与维度；旧 collection 不受影响。
+    @Autowired
     public MilvusConsistentVectorStore(@Value("${milvus.host}") String host,
                                        @Value("${milvus.port}") int port,
                                        @Value("${ingestion.milvus.collection-name}") String collectionName,
                                        @Value("${milvus.embedding-dimension}") int embeddingDimension,
-                                       @Value("${ingestion.milvus.index-type:AUTOINDEX}") String indexType) {
+                                       @Value("${ingestion.milvus.index-type:AUTOINDEX}") String indexType,
+                                       @Value("${ingestion.milvus.rpc-deadline-ms:30000}") long rpcDeadlineMs) {
+        if (rpcDeadlineMs <= 0) {
+            throw new IllegalArgumentException(
+                    "Milvus RPC deadline 必须大于 0");
+        }
         this.collectionName = collectionName;
         this.embeddingDimension = embeddingDimension;
         this.indexType = parseIndexType(indexType);
         ConnectConfig config = ConnectConfig.builder()
                 .uri("http://" + host + ":" + port)
+                .connectTimeoutMs(rpcDeadlineMs)
+                .rpcDeadlineMs(rpcDeadlineMs)
                 .build();
         this.client = new MilvusClientV2(config);
         initCollection();
@@ -157,7 +176,7 @@ public class MilvusConsistentVectorStore
 
     /**
      * 等待当前 collection 的已写入 segment 完成 flush。
-     * 在线链路不应每条写入都调用；评测和批量导入只在完整批次边界调用一次。
+     * 在线链路不应每条写入都调用；awaitVersionVisible 只在完整批次边界调用一次。
      */
     public void flush(long timeoutMs) {
         if (timeoutMs <= 0) {
@@ -167,6 +186,46 @@ public class MilvusConsistentVectorStore
                 .collectionNames(List.of(collectionName))
                 .waitFlushedTimeoutMs(timeoutMs)
                 .build());
+    }
+
+    @Override
+    public void awaitVersionVisible(long documentVersionId,
+                                    int expectedCount,
+                                    Duration timeout) {
+        if (expectedCount < 0 || timeout == null || timeout.isZero()
+                || timeout.isNegative()) {
+            throw new IllegalArgumentException(
+                    "Expected count must be non-negative and timeout positive");
+        }
+
+        long timeoutNanos;
+        try {
+            timeoutNanos = timeout.toNanos();
+        } catch (ArithmeticException tooLarge) {
+            throw new IllegalArgumentException(
+                    "Vector visibility timeout is too large", tooLarge);
+        }
+        long started = System.nanoTime();
+        flush(Math.max(1L, timeout.toMillis()));
+
+        long observed = countByVersion(documentVersionId);
+        while (observed < expectedCount) {
+            long remaining = timeoutNanos - (System.nanoTime() - started);
+            if (remaining <= 0) {
+                throw new VectorVisibilityTimeoutException(
+                        documentVersionId, expectedCount, observed, timeout);
+            }
+            try {
+                TimeUnit.NANOSECONDS.sleep(Math.min(
+                        remaining, TimeUnit.MILLISECONDS.toNanos(100)));
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new VectorVisibilityTimeoutException(
+                        documentVersionId, expectedCount, observed,
+                        timeout, interrupted);
+            }
+            observed = countByVersion(documentVersionId);
+        }
     }
 
     @Override

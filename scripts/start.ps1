@@ -36,8 +36,12 @@ function Wait-Services {
     $frontendReady = $false
     $backendReady = $false
 
-    Write-Host "Waiting for real services..."
+    Write-Host "Waiting for current-source Docker services..."
     while ((Get-Date) -lt $deadline) {
+        $exitedBackend = @(docker compose ps --status exited --services backend 2>$null)
+        if ($LASTEXITCODE -eq 0 -and $exitedBackend -contains "backend") {
+            throw "Backend exited before becoming healthy. Run logs.bat and inspect database migration/startup errors."
+        }
         if (-not $backendReady) {
             $backendReady = Test-HttpReady "http://localhost:8080/actuator/health"
         }
@@ -54,7 +58,7 @@ function Wait-Services {
 }
 
 if (-not (Test-Command "docker")) {
-    throw "Docker was not found. Real mode requires Docker Engine / Docker Desktop."
+    throw "Docker was not found. The current-source start script requires Docker Engine / Docker Desktop; it has no portable fallback."
 }
 
 docker info *> $null
@@ -67,7 +71,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "Docker Compose was not found. Update Docker Desktop or install Docker Compose."
 }
 
-Write-Host "Starting real mode: MySQL + Milvus + MinIO + backend + frontend."
+Write-Host "Starting full Docker mode from the current source tree: MySQL + Milvus + MinIO + backend + frontend."
 docker compose up -d --build
 if ($LASTEXITCODE -ne 0) {
     throw "docker compose up failed."

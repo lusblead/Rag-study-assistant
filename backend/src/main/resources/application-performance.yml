@@ -1,0 +1,32 @@
+# 本配置仅用于受控的本机性能观测；不得把该 profile 暴露到非回环地址。
+server:
+  address: 127.0.0.1
+
+management:
+  server:
+    address: 127.0.0.1
+    port: ${RAG_PERFORMANCE_MANAGEMENT_PORT:8081}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  info:
+    env:
+      enabled: true
+  metrics:
+    distribution:
+      percentiles:
+        rag.performance.span.duration: 0.5,0.95,0.99
+
+rag:
+  performance:
+    probe:
+      enabled: false
+      token: ${RAG_PERFORMANCE_TOKEN:}
+
+# 由受控启动流程写入已构建产物的 SHA-256；Harness 会从 /actuator/info
+# 实时读取并与授权 profile 比对。空值只允许应用启动，不允许性能执行。
+info:
+  rag:
+    performance:
+      runtimeBuildFingerprintSha256: ${RAG_PERFORMANCE_RUNTIME_BUILD_FINGERPRINT_SHA256:}

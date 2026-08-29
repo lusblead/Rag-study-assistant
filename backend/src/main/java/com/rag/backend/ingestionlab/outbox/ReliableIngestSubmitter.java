@@ -5,13 +5,15 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rag.backend.ingestionlab.job.IngestJob;
 import com.rag.backend.ingestionlab.job.IngestJobMapper;
 import com.rag.backend.ingestionlab.identity.PipelineManifest;
+import com.rag.backend.observability.trace.TraceCarrier;
+import com.rag.backend.observability.trace.TraceContextService;
+import com.rag.backend.observability.trace.TraceSpan;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
-import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -21,6 +23,7 @@ public class ReliableIngestSubmitter {
     private final IngestJobMapper jobMapper;
     private final OutboxEventMapper outboxMapper;
     private final ObjectMapper objectMapper;
+    private final TraceContextService traces;
     // 注入时钟使租约过期可确定性测试。
     private final Clock clock;
 
@@ -29,18 +32,23 @@ public class ReliableIngestSubmitter {
     public ReliableIngestSubmitter(DocumentVersionMapper versionMapper,
                                    IngestJobMapper jobMapper,
                                    OutboxEventMapper outboxMapper,
-                                   ObjectMapper objectMapper) {
-        this(versionMapper, jobMapper, outboxMapper, objectMapper, Clock.systemUTC());
+                                   ObjectMapper objectMapper,
+                                   TraceContextService traces) {
+        this(versionMapper, jobMapper, outboxMapper, objectMapper,
+                traces, Clock.systemUTC());
     }
 
     ReliableIngestSubmitter(DocumentVersionMapper versionMapper,
                             IngestJobMapper jobMapper,
                             OutboxEventMapper outboxMapper,
-                            ObjectMapper objectMapper, Clock clock) {
+                            ObjectMapper objectMapper,
+                            TraceContextService traces,
+                            Clock clock) {
         this.versionMapper = versionMapper;
         this.jobMapper = jobMapper;
         this.outboxMapper = outboxMapper;
         this.objectMapper = objectMapper;
+        this.traces = traces;
         this.clock = clock;
     }
 
@@ -71,6 +79,28 @@ public class ReliableIngestSubmitter {
                               String pipelineFingerprint,
                               String pipelineManifest,
                               int manifestSchemaVersion) {
+        try (TraceSpan span = traces.startSpan("ingestion.submit")) {
+            try {
+                Submission result = submitWithinTrace(
+                        documentId, sourceRef, contentHash,
+                        pipelineFingerprint, pipelineManifest,
+                        manifestSchemaVersion);
+                // target 返回后 Spring 事务代理才会 commit；此处只能证明已准备完毕。
+                span.result(result.reused() ? "reused" : "prepared");
+                return result;
+            } catch (RuntimeException | Error error) {
+                span.error(error);
+                throw error;
+            }
+        }
+    }
+
+    private Submission submitWithinTrace(long documentId,
+                                         String sourceRef,
+                                         String contentHash,
+                                         String pipelineFingerprint,
+                                         String pipelineManifest,
+                                         int manifestSchemaVersion) {
         DocumentVersionMapper.LockedDocumentRow document =
                 versionMapper.lockDocument(documentId);
         if (document == null) {
@@ -91,6 +121,13 @@ public class ReliableIngestSubmitter {
                 throw new IllegalStateException(
                         "Version exists without INGEST job: " + existing.getId());
             }
+            // 请求级 submit span 不冒充既有 Job；短子 span 只覆盖 correlationId，
+            // parent 仍是当前请求，并通过 link 指向首次提交的持久 Trace。
+            try (TraceSpan reused = traces.startSpan(
+                    "ingestion.submit.reuse", existingJob.getJobId())) {
+                traces.link(existingJob.traceCarrier(), "ingestion.submit.reused");
+                reused.result("reused");
+            }
             return new Submission(existing.getId(),
                     existingJob.getJobId(), true);
         }
@@ -108,6 +145,7 @@ public class ReliableIngestSubmitter {
         versionMapper.insert(version);
 
         String jobId = UUID.randomUUID().toString();
+        TraceCarrier carrier = traces.capture(jobId);
         LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
         IngestJob job = new IngestJob();
         job.setJobId(jobId);
@@ -116,6 +154,7 @@ public class ReliableIngestSubmitter {
         job.setJobType("INGEST");
         job.setMaxAttempts(5);
         job.setNextRunAt(now);
+        job.setSubmitTraceparent(carrier.traceparent());
         jobMapper.insert(job);
 
         OutboxEvent event = new OutboxEvent();
@@ -123,9 +162,8 @@ public class ReliableIngestSubmitter {
         event.setAggregateType("INGEST_JOB");
         event.setAggregateId(jobId);
         event.setEventType("INGEST_REQUESTED");
-        event.setPayloadJson(json(Map.of(
-                "jobId", jobId,
-                "documentVersionId", version.getId())));
+        event.setPayloadJson(json(IngestRequestedEventPayload.current(
+                jobId, version.getId(), carrier)));
         event.setAvailableAt(now);
         outboxMapper.insert(event);
 

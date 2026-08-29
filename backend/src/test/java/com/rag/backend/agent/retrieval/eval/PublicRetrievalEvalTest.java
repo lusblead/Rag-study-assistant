@@ -4,6 +4,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.rag.backend.agent.evaluation.Answerability;
+import com.rag.backend.agent.evaluation.CaseRetrievalMetrics;
+import com.rag.backend.agent.evaluation.RetrievalEvalReport;
+import com.rag.backend.agent.evaluation.RetrievalGroundTruth;
+import com.rag.backend.agent.evaluation.RetrievalMetricsAccumulator;
+import com.rag.backend.agent.evaluation.RetrievalMetricsCalculator;
 import com.rag.backend.agent.embedding.EmbeddingClient;
 import com.rag.backend.agent.model.KnowledgeChunk;
 import com.rag.backend.agent.repository.KnowledgeChunkRepository;
@@ -12,13 +18,17 @@ import com.rag.backend.agent.retrieval.MilvusKnowledgeRetriever;
 import com.rag.backend.agent.retrieval.RetrievedChunk;
 import com.rag.backend.ingestionlab.identity.StableHash;
 import com.rag.backend.ingestionlab.vector.ConsistentVectorStore;
+import com.rag.backend.ingestionlab.vector.InMemoryConsistentVectorStore;
 import com.rag.backend.ingestionlab.vector.MilvusConsistentVectorStore;
+import com.rag.backend.ingestionlab.retrieval.VersionedVectorHit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.net.URI;
+import com.sun.net.httpserver.HttpServer;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -26,6 +36,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -35,9 +47,11 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * 使用公开 T2Retrieval qrels、硅基流动 BGE-M3 和临时 Milvus 跑真实检索基线。
@@ -56,8 +70,165 @@ class PublicRetrievalEvalTest {
     private static final int TOP_K = 10;
     private final ObjectMapper json = new ObjectMapper();
 
+    /**
+     * 专用 closeout 路径：只读 corpus cache + 真实 query provider + 进程内 exact cosine。
+     * 不改变上面的 Milvus 测试默认语义，也不写入 corpus cache。
+     */
+    @Test
+    void runPublicT2SubsetWithRealBgeM3InProcessExactCosine() throws Exception {
+        if (!Boolean.getBoolean("rag.eval.inProcessExactCosine")) return;
+        Path root = Path.of(System.getProperty("rag.eval.datasetDir",
+                "backend/evals/datasets/t2-retrieval-public-v1"));
+        Path output = Path.of(System.getProperty("rag.eval.output"));
+        verifyFrozenInputsAndExclusiveOutput(root, output);
+        List<CorpusRow> corpus = readCorpus(root.resolve("corpus.jsonl"));
+        List<EvalCase> cases = readCases(root.resolve("cases.jsonl"));
+        assertEquals(2000, corpus.size(), "frozen corpus count");
+        assertEquals(100, cases.size(), "frozen case count");
+        assertEquals(508, cases.stream().mapToInt(c -> c.relevantDocumentIds().size()).sum(),
+                "frozen positives");
+        String baseUrl = requiredEnv("RAG_EVAL_EMBEDDING_BASE_URL");
+        String model = requiredEnv("RAG_EVAL_EMBEDDING_MODEL");
+        String apiKey = requiredEnv("RAG_EVAL_EMBEDDING_API_KEY");
+        if (!"BAAI/bge-m3".equals(model)) throw new IllegalStateException("embedding model drift");
+        Path cache = Path.of(System.getProperty("rag.eval.embeddingCache"));
+        BatchEmbeddingGateway gateway = new BatchEmbeddingGateway(json, baseUrl, model, apiKey,
+                DIMENSION, cache);
+        Map<Long, List<Double>> vectors = gateway.embedCorpusFromReadOnlyCache(corpus);
+        if (vectors.size() != 2000 || gateway.cacheHitCount != 2000) {
+            throw new IllegalStateException("BLOCKED corpus cache miss");
+        }
+        InMemoryConsistentVectorStore store = new InMemoryConsistentVectorStore();
+        Map<Long, Long> documentByChunk = new HashMap<>();
+        for (CorpusRow row : corpus) {
+            documentByChunk.put(row.chunkId(), row.documentId());
+            store.upsert(new ConsistentVectorStore.VectorRecord(row.chunkId(), row.chunkId(), COURSE_ID,
+                    row.documentId(), ACTIVE_VERSION_ID, "t2:" + row.documentId(),
+                    StableHash.sha256(row.content()), model, DIMENSION, vectors.get(row.chunkId())));
+        }
+        List<Map<String, Object>> caseReports = new ArrayList<>();
+        RetrievalMetricsCalculator metrics = new RetrievalMetricsCalculator();
+        Totals totals = new Totals(metrics);
+        for (EvalCase evalCase : cases) {
+            long started = System.nanoTime();
+            List<Double> query = gateway.embedLiveQuery(evalCase.query());
+            List<VersionedVectorHit> hits = store.search(COURSE_ID, Set.of(ACTIVE_VERSION_ID), query, TOP_K)
+                    .stream().sorted((a, b) -> {
+                        int score = Double.compare(b.score(), a.score());
+                        return score != 0 ? score : Long.compare(a.mysqlChunkId(), b.mysqlChunkId());
+                    }).toList();
+            List<Long> docs = new ArrayList<>(new LinkedHashSet<>(hits.stream()
+                    .map(hit -> documentByChunk.get(hit.mysqlChunkId())).toList()));
+            Map<Integer, CaseRetrievalMetrics> byK = Map.of(
+                    1, metrics.evaluateCase(groundTruth(evalCase), docs, 1),
+                    3, metrics.evaluateCase(groundTruth(evalCase), docs, 3),
+                    5, metrics.evaluateCase(groundTruth(evalCase), docs, 5),
+                    10, metrics.evaluateCase(groundTruth(evalCase), docs, 10));
+            long latency = Duration.ofNanos(System.nanoTime() - started).toMillis();
+            totals.add(groundTruth(evalCase), byK, latency);
+            caseReports.add(Map.of("caseId", evalCase.caseId(), "returnedDocumentIds", docs,
+                    "metrics", metrics(byK), "endToEndLatencyMs", latency));
+        }
+        if (gateway.querySuccessCount != 100 || gateway.requestCount < 100) {
+            throw new IllegalStateException("incomplete live query budget");
+        }
+        Map<String, Object> report = new LinkedHashMap<>();
+        report.put("evaluationType", "IN_PROCESS_EXACT_COSINE_COMPONENT_EVAL");
+        report.put("evidenceBoundary", "IN_PROCESS_EXACT_COSINE_COMPONENT_EVAL; not Milvus E2E, Golden Dataset, refusal/answer quality, production performance, or Owner acceptance");
+        report.put("configuration", Map.of("vectorStore", "InMemoryConsistentVectorStore",
+                "visibilitySemantics", "process-local immediate visibility", "embeddingModel", model,
+                "topK", TOP_K, "stableTieBreak", "score desc then chunkId asc"));
+        report.put("providerUsage", gateway.usageReport());
+        report.put("overall", totals.report());
+        report.put("cases", caseReports);
+        writeExclusiveReport(output, report);
+    }
+
+    @Test
+    void retryableStatusesExhaustAfterFiveAttemptsWithoutCacheOrReportSideEffects() throws Exception {
+        for (int status : List.of(429, 503, 504)) {
+            AtomicInteger requests = new AtomicInteger();
+            HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+            server.createContext("/embeddings", exchange -> {
+                requests.incrementAndGet();
+                exchange.sendResponseHeaders(status, -1);
+                exchange.close();
+            });
+            server.start();
+            Path missingCache = Path.of("target", "rag-public-eval-missing-cache-" + status
+                    + "-" + System.nanoTime() + ".jsonl");
+            try {
+                BatchEmbeddingGateway gateway = new BatchEmbeddingGateway(json,
+                        "http://127.0.0.1:" + server.getAddress().getPort(), "BAAI/bge-m3",
+                        "test-key", DIMENSION, missingCache);
+
+                assertThrows(IOException.class, () -> gateway.requestEmbeddings(List.of("query")));
+                assertEquals(5, requests.get(), "retryable status " + status + " request count");
+                assertEquals(5, gateway.requestCount, "retryable status " + status + " gateway count");
+                assertEquals(4, gateway.retryCount, "retryable status " + status + " retry count");
+                assertFalse(Files.exists(missingCache), "retry exhaustion must not create cache");
+            } finally {
+                server.stop(0);
+            }
+        }
+    }
+
+    @Test
+    void preexistingOutputRejectsBeforeFrozenInputOrReportMutation() throws Exception {
+        Path root = Path.of("backend/evals/datasets/t2-retrieval-public-v1");
+        Path existingOutput = root.resolve("corpus.jsonl");
+        String before = java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                .digest(Files.readAllBytes(existingOutput)));
+
+        assertThrows(IllegalStateException.class,
+                () -> verifyFrozenInputsAndExclusiveOutput(root, existingOutput));
+
+        String after = java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                .digest(Files.readAllBytes(existingOutput)));
+        assertEquals(before, after, "existing output must not be overwritten");
+    }
+
+    @Test
+    void missingProviderConfigurationRejectsBeforeRequestDispatch() {
+        assertThrows(IllegalStateException.class,
+                () -> requiredEnv("__RAG_PUBLIC_EVAL_TEST_MISSING_CONFIG__"));
+    }
+
+    @Test
+    void missingCorpusCacheFailsClosedWithoutRequestOrCacheWrite() throws Exception {
+        Path missingCache = Path.of("target", "rag-public-eval-missing-corpus-"
+                + System.nanoTime() + ".jsonl");
+        BatchEmbeddingGateway gateway = new BatchEmbeddingGateway(json, "http://127.0.0.1:1",
+                "BAAI/bge-m3", "test-key", DIMENSION, missingCache);
+
+        assertThrows(IllegalStateException.class, () -> gateway.embedCorpusFromReadOnlyCache(List.of(
+                new CorpusRow(1L, 1L, "title", "content", false))));
+        assertEquals(0, gateway.requestCount, "cache rejection must precede Provider dispatch");
+        assertFalse(Files.exists(missingCache), "cache rejection must not create cache");
+    }
+
+    private void verifyFrozenInputsAndExclusiveOutput(Path root, Path output) throws Exception {
+        if (output == null || !Files.isDirectory(output.getParent()) || Files.exists(output))
+            throw new IllegalStateException("exclusive output gate failed");
+        verifySha(root.resolve("corpus.jsonl"), "C46E318E63B34207020982C6DA9781C81E2CC11C3F59FA4DDA5FB21960E7487B");
+        verifySha(root.resolve("cases.jsonl"), "98E20783A39403D692D71166DB6CF7929D350F2B1D6E94CCBE2728A2E9999378");
+    }
+
+    private void verifySha(Path path, String expected) throws IOException, NoSuchAlgorithmException {
+        String actual = java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                .digest(Files.readAllBytes(path))).toUpperCase();
+        if (!expected.equals(actual)) throw new IllegalStateException("frozen input hash drift: " + path);
+    }
+
+    private void writeExclusiveReport(Path output, Map<String, Object> report) throws IOException {
+        try (var stream = Files.newOutputStream(output, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)) {
+            json.writerWithDefaultPrettyPrinter().writeValue(stream, report);
+        }
+    }
+
     @Test
     void runPublicT2SubsetWithRealBgeM3AndMilvus() throws Exception {
+        if (Boolean.getBoolean("rag.eval.inProcessExactCosine")) return;
         Path datasetRoot = Path.of(System.getProperty(
                 "rag.eval.datasetDir", "backend/evals/datasets/t2-retrieval-public-v1"));
         List<CorpusRow> corpus = readCorpus(datasetRoot.resolve("corpus.jsonl"));
@@ -118,7 +289,8 @@ class PublicRetrievalEvalTest {
                 CANDIDATE_K);
 
         List<Map<String, Object>> caseReports = new ArrayList<>();
-        Totals totals = new Totals();
+        RetrievalMetricsCalculator metricsCore = new RetrievalMetricsCalculator();
+        Totals totals = new Totals(metricsCore);
         try {
             for (EvalCase evalCase : cases) {
                 long started = System.nanoTime();
@@ -129,8 +301,16 @@ class PublicRetrievalEvalTest {
                 // T2 的 qrels 是文档级。生产 Retriever 返回 Chunk，所以按首次出现顺序去重为文档排名。
                 List<Long> rankedDocuments = new ArrayList<>(new LinkedHashSet<>(
                         rankedChunks.stream().map(RetrievedChunk::documentId).toList()));
-                totals.add(rankedDocuments, evalCase.relevantDocumentIds(), latencyMs);
-                caseReports.add(caseReport(evalCase, rankedChunks, rankedDocuments, latencyMs));
+                RetrievalGroundTruth groundTruth = groundTruth(evalCase);
+                Map<Integer, CaseRetrievalMetrics> canonicalMetrics = Map.of(
+                        1, metricsCore.evaluateCase(groundTruth, rankedDocuments, 1),
+                        3, metricsCore.evaluateCase(groundTruth, rankedDocuments, 3),
+                        5, metricsCore.evaluateCase(groundTruth, rankedDocuments, 5),
+                        10, metricsCore.evaluateCase(groundTruth, rankedDocuments, 10));
+                totals.add(groundTruth, canonicalMetrics, latencyMs);
+                caseReports.add(caseReport(
+                        evalCase, rankedChunks, rankedDocuments,
+                        canonicalMetrics, latencyMs));
             }
 
             Map<String, Object> report = new LinkedHashMap<>();
@@ -155,7 +335,7 @@ class PublicRetrievalEvalTest {
                     Map.entry("queryEmbeddingMode", queryMode),
                     Map.entry("metricLevel", "document-after-chunk-dedup")));
             report.put("providerUsage", embeddingGateway.usageReport());
-            report.put("overall", totals.report(cases.size()));
+            report.put("overall", totals.report());
             report.put("cases", caseReports);
 
             Path output = Path.of(System.getProperty(
@@ -193,8 +373,9 @@ class PublicRetrievalEvalTest {
             EvalCase evalCase,
             List<RetrievedChunk> rankedChunks,
             List<Long> rankedDocuments,
+            Map<Integer, CaseRetrievalMetrics> canonicalMetrics,
             long latencyMs) {
-        Map<String, Object> metrics = metrics(rankedDocuments, evalCase.relevantDocumentIds());
+        Map<String, Object> metrics = metrics(canonicalMetrics);
         Map<String, Object> report = new LinkedHashMap<>();
         report.put("caseId", evalCase.caseId());
         report.put("sourceQueryId", evalCase.sourceQueryId());
@@ -211,15 +392,24 @@ class PublicRetrievalEvalTest {
         return report;
     }
 
-    private Map<String, Object> metrics(List<Long> ranked, List<Long> relevant) {
+    private Map<String, Object> metrics(
+            Map<Integer, CaseRetrievalMetrics> canonicalMetrics) {
+        CaseRetrievalMetrics at10 = canonicalMetrics.get(10);
         Map<String, Object> metrics = new LinkedHashMap<>();
-        metrics.put("recallAt1", recallAt(ranked, relevant, 1));
-        metrics.put("recallAt3", recallAt(ranked, relevant, 3));
-        metrics.put("recallAt5", recallAt(ranked, relevant, 5));
-        metrics.put("recallAt10", recallAt(ranked, relevant, 10));
-        metrics.put("reciprocalRank", reciprocalRank(ranked, relevant));
-        metrics.put("ndcgAt10", ndcgAt(ranked, relevant, 10));
+        metrics.put("recallAt1", canonicalMetrics.get(1).recallAtK());
+        metrics.put("recallAt3", canonicalMetrics.get(3).recallAtK());
+        metrics.put("recallAt5", canonicalMetrics.get(5).recallAtK());
+        metrics.put("recallAt10", at10.recallAtK());
+        metrics.put("reciprocalRank", at10.reciprocalRank());
+        metrics.put("ndcgAt10", at10.ndcgAtK());
         return metrics;
+    }
+
+    private RetrievalGroundTruth groundTruth(EvalCase evalCase) {
+        Set<Long> relevant = Set.copyOf(evalCase.relevantDocumentIds());
+        return new RetrievalGroundTruth(
+                evalCase.caseId(), Answerability.ANSWERABLE,
+                relevant, relevant, List.of(), Map.of(), Set.of());
     }
 
     private List<CorpusRow> readCorpus(Path path) throws IOException {
@@ -284,35 +474,6 @@ class PublicRetrievalEvalTest {
         return result;
     }
 
-    private double recallAt(List<Long> ranked, List<Long> relevant, int k) {
-        long hits = ranked.stream().limit(k).filter(relevant::contains).count();
-        return relevant.isEmpty() ? 0.0 : hits / (double) relevant.size();
-    }
-
-    private double reciprocalRank(List<Long> ranked, List<Long> relevant) {
-        for (int index = 0; index < ranked.size(); index++) {
-            if (relevant.contains(ranked.get(index))) return 1.0 / (index + 1.0);
-        }
-        return 0.0;
-    }
-
-    private double ndcgAt(List<Long> ranked, List<Long> relevant, int k) {
-        if (relevant.isEmpty()) return 0.0;
-        double dcg = 0.0;
-        for (int index = 0; index < Math.min(k, ranked.size()); index++) {
-            if (relevant.contains(ranked.get(index))) dcg += 1.0 / log2(index + 2.0);
-        }
-        double idcg = 0.0;
-        for (int index = 0; index < Math.min(k, relevant.size()); index++) {
-            idcg += 1.0 / log2(index + 2.0);
-        }
-        return idcg == 0.0 ? 0.0 : dcg / idcg;
-    }
-
-    private double log2(double value) {
-        return Math.log(value) / Math.log(2.0);
-    }
-
     private record CorpusRow(long chunkId, long documentId, String title,
                              String content, boolean truncated) { }
 
@@ -335,6 +496,7 @@ class PublicRetrievalEvalTest {
         private long providerLatencyMs;
         private long cacheHitCount;
         private long queryCacheHitCount;
+        private long querySuccessCount;
 
         private BatchEmbeddingGateway(ObjectMapper json, String baseUrl, String model,
                                       String apiKey, int expectedDimension, Path cachePath)
@@ -378,9 +540,24 @@ class PublicRetrievalEvalTest {
             return Map.copyOf(result);
         }
 
+        private Map<Long, List<Double>> embedCorpusFromReadOnlyCache(List<CorpusRow> corpus) {
+            Map<Long, List<Double>> result = new LinkedHashMap<>();
+            for (CorpusRow row : corpus) {
+                List<Double> vector = cache.get(cacheKey(row.content()));
+                if (vector == null || vector.size() != expectedDimension) {
+                    throw new IllegalStateException("BLOCKED corpus cache miss");
+                }
+                result.put(row.chunkId(), vector);
+                cacheHitCount++;
+            }
+            return Map.copyOf(result);
+        }
+
         private List<Double> embedLiveQuery(String query) {
             try {
-                return requestEmbeddings(List.of(query)).get(0);
+                List<Double> result = requestEmbeddings(List.of(query)).get(0);
+                querySuccessCount++;
+                return result;
             } catch (IOException e) {
                 throw new IllegalStateException("Query Embedding 请求失败: " + e.getMessage(), e);
             } catch (InterruptedException e) {
@@ -421,8 +598,7 @@ class PublicRetrievalEvalTest {
                 if (response.statusCode() != 429
                         && response.statusCode() != 503
                         && response.statusCode() != 504) {
-                    throw new IOException("Embedding 返回不可重试状态 " + response.statusCode()
-                            + ": " + abbreviate(response.body(), 300));
+                    throw new IOException("Embedding 返回不可重试状态 " + response.statusCode());
                 }
             }
             throw new IOException("Embedding Provider 在 5 次有界尝试后仍不可用");
@@ -518,39 +694,45 @@ class PublicRetrievalEvalTest {
                     "providerLatencyMs", providerLatencyMs,
                     "corpusCacheHitCount", cacheHitCount,
                     "queryCacheHitCount", queryCacheHitCount,
-                    "cachePath", cachePath.toString());
+                    "querySuccessCount", querySuccessCount);
         }
     }
 
     private final class Totals {
-        private double recallAt1;
-        private double recallAt3;
-        private double recallAt5;
-        private double recallAt10;
-        private double reciprocalRank;
-        private double ndcgAt10;
+        private final RetrievalMetricsCalculator metricsCore;
+        private final RetrievalMetricsAccumulator canonical =
+                new RetrievalMetricsAccumulator();
         private final List<Long> latencies = new ArrayList<>();
 
-        private void add(List<Long> ranked, List<Long> relevant, long latencyMs) {
-            recallAt1 += recallAt(ranked, relevant, 1);
-            recallAt3 += recallAt(ranked, relevant, 3);
-            recallAt5 += recallAt(ranked, relevant, 5);
-            recallAt10 += recallAt(ranked, relevant, 10);
-            reciprocalRank += reciprocalRank(ranked, relevant);
-            ndcgAt10 += ndcgAt(ranked, relevant, 10);
+        private Totals(RetrievalMetricsCalculator metricsCore) {
+            this.metricsCore = metricsCore;
+        }
+
+        private void add(RetrievalGroundTruth groundTruth,
+                         Map<Integer, CaseRetrievalMetrics> metrics,
+                         long latencyMs) {
+            canonical.add(groundTruth, metrics);
             latencies.add(latencyMs);
         }
 
-        private Map<String, Object> report(int count) {
+        private Map<String, Object> report() {
+            RetrievalEvalReport at1 = metricsCore.summarizeGroundTruth(
+                    canonical.groundTruths(), canonical.resultsAt(1), 1);
+            RetrievalEvalReport at3 = metricsCore.summarizeGroundTruth(
+                    canonical.groundTruths(), canonical.resultsAt(3), 3);
+            RetrievalEvalReport at5 = metricsCore.summarizeGroundTruth(
+                    canonical.groundTruths(), canonical.resultsAt(5), 5);
+            RetrievalEvalReport at10 = metricsCore.summarizeGroundTruth(
+                    canonical.groundTruths(), canonical.resultsAt(10), 10);
             List<Long> sorted = latencies.stream().sorted().toList();
             return Map.of(
-                    "caseCount", count,
-                    "recallAt1", recallAt1 / count,
-                    "recallAt3", recallAt3 / count,
-                    "recallAt5", recallAt5 / count,
-                    "recallAt10", recallAt10 / count,
-                    "mrr", reciprocalRank / count,
-                    "ndcgAt10", ndcgAt10 / count,
+                    "caseCount", canonical.size(),
+                    "recallAt1", at1.macroRecallAtK(),
+                    "recallAt3", at3.macroRecallAtK(),
+                    "recallAt5", at5.macroRecallAtK(),
+                    "recallAt10", at10.macroRecallAtK(),
+                    "mrr", at10.meanReciprocalRank(),
+                    "ndcgAt10", at10.macroNdcgAtK(),
                     "endToEndLatencyP50Ms", percentile(sorted, 0.50),
                     "endToEndLatencyP95Ms", percentile(sorted, 0.95));
         }

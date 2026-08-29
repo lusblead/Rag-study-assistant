@@ -1,0 +1,20 @@
+{
+  "configured": false,
+  "decisionBoundary": "Owner values are intentionally absent; this policy must return OWNER_DECISION_DEFERRED and can never produce PASS.",
+  "deferredOwnerFields": [
+    "artifactCostBudget",
+    "artifactRetentionDays",
+    "branchProtectionCheckNames",
+    "businessCriticalCaseIds",
+    "businessMetricThresholds",
+    "milestoneRef",
+    "milestoneTest55Authorization",
+    "milestoneTrigger",
+    "scheduledCron"
+  ],
+  "ownerDecisionRequired": true,
+  "policyId": "retrieval-business-policy-example-v1",
+  "policyScope": "BUSINESS_RELEASE_QUALITY",
+  "schema": "rag-tiered-regression-policy/v1",
+  "tier": "MILESTONE"
+}

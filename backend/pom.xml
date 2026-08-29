@@ -141,6 +141,9 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
                     <forkCount>0</forkCount>
+                    <systemPropertyVariables>
+                        <rag.eval.buildDirectory>${project.build.directory}</rag.eval.buildDirectory>
+                    </systemPropertyVariables>
                 </configuration>
             </plugin>
         </plugins>

@@ -1,0 +1,910 @@
+version: 1
+feature_id: "rag.layered-performance-baseline"
+title: "Layered RAG performance baseline"
+status: "implemented"
+
+characteristics:
+  cross_component: true
+  asynchronous: true
+  persisted_state: true
+  external_dependencies: true
+  retry_or_compensation: false
+  security_sensitive: true
+
+nodes:
+  E1:
+    kind: entry
+    description: "Invoke the repository-local PowerShell wrapper and Python entry point"
+    trigger: "run-performance.ps1 with optional -Execute, or run_performance.py with optional --execute"
+    code:
+      - path: backend/evals/performance/run-performance.ps1
+        symbol: run_performance.py
+        role: repository-local wrapper
+      - path: backend/evals/performance/run_performance.py
+        symbol: main
+        role: CLI entry
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_powershell_wrapper_only_dispatches_python_and_defaults_to_validation
+
+  D1:
+    kind: decision
+    description: "Whether the caller explicitly requests execution"
+    condition: "The parsed arguments contain --execute; every other invocation is validate-only"
+    code:
+      - path: backend/evals/performance/run_performance.py
+        symbol: main
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_validate_only_does_not_call_http_or_create_output
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_execute_function_cannot_bypass_explicit_flag
+
+  A1:
+    kind: action
+    description: "Validate profile, JMX and report-schema metadata without HTTP, JMeter execution or output creation"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: validate_only
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_validate_only_does_not_call_http_or_create_output
+
+  D2:
+    kind: decision
+    description: "Whether all validate-only contracts pass"
+    condition: "Profile validation, JMX 5.6.3 structure and exact health assertions, and report schema metadata are valid"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: validate_only
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: validate_profile
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: validate_jmx
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_example_profile_is_safe_and_valid
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_jmx_xml_and_key_samplers
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_validate_jmx_rejects_weakened_health_or_answer_assertions
+
+  D3:
+    kind: decision
+    description: "Whether L4 remains disabled"
+    condition: "profile.layers.L4 is exactly false; profile validation and execution validation both reject any other value"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: profile_errors
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: execution_gate_errors
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_l4_is_always_rejected
+
+  D4:
+    kind: decision
+    description: "Whether execution authorization, location, disposable-state and cost gates pass"
+    condition: "CLI --execute and profile execution.enabled are true, disposableStateConfirmed is true, Backend and separate Actuator origins are loopback, external mode is disabled with budget zero, and a local zero-external-call metric path is configured; provider-budgeted is rejected"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: validate_execution_gate
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: execution_gate_errors
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: external_policy_errors
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: is_loopback_base_url
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_execution_requires_cli_and_profile_double_gate
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_execution_requires_loopback_and_disposable_state
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_actuator_origin_is_separate_and_must_be_loopback
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_external_budget_pair_is_fail_closed
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_zero_budget_execution_requires_measurable_zero_external_calls
+
+  D5:
+    kind: decision
+    description: "Whether runtime-only payloads and identifiers satisfy enabled-layer contracts and the authorized workload fingerprint"
+    condition: "A frozen entry-time environment copy contains a valid L1 token/body, a sufficiently large unique positive disposable L2 document-ID pool, and a valid L3 course/question with sessionId absent or null; their canonical fingerprint exactly matches workload.fixtureFingerprintSha256"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: runtime_environment_errors
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: validate_runtime_environment
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: runtime_fixture_fingerprint
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: verify_runtime_fixture_fingerprint
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: parse_document_id_pool
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_runtime_values_are_environment_only_and_shape_checked
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_l2_rejects_duplicate_or_undersized_document_pool
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_l3_requires_a_fresh_session_per_request
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_runtime_fixture_fingerprint_binds_payloads_and_scale_without_persisting_them
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_execution_freezes_environment_before_runtime_callbacks
+
+  D6:
+    kind: decision
+    description: "Whether JMX, exact JMeter version, launcher fingerprint and Git provenance are available"
+    condition: "JMX validates, Apache JMeter resolves and reports exactly 5.6.3, its launcher file can be SHA-256 fingerprinted, and Git HEAD plus dirty fingerprint can be captured before output creation"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: validate_jmx
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: discover_jmeter
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: jmeter_version
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: git_snapshot
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_jmx_xml_and_key_samplers
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_validate_jmx_rejects_weakened_health_or_answer_assertions
+
+  D7:
+    kind: decision
+    description: "Whether a new run directory can be created without overwriting anything"
+    condition: "create_run_directory can mkdir the generated run ID with exist_ok=false"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: create_run_directory
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_run_directory_and_report_are_exclusive_create
+
+  T1:
+    kind: transition
+    description: "Create the exclusive run directory without writing an initial manifest or status"
+    entity: LayeredPerformanceRunArtifact
+    from: ABSENT
+    to: RUN_DIRECTORY_EXISTS
+    trigger: "all pre-run gates pass and exclusive mkdir succeeds"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: create_run_directory
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_run_directory_and_report_are_exclusive_create
+
+  D8:
+    kind: decision
+    description: "Whether the authorized runtime identity and required Actuator runtime evidence are available"
+    condition: "Separate loopback Actuator reports the exact authorized runtime build SHA-256, health is UP, and CPU plus heap-used/max metrics are readable and valid"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: actuator_runtime_build_fingerprint
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: actuator_preflight
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: actuator_resource_sample
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_runtime_build_identity_is_read_live_from_actuator_info
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_missing_actuator_is_a_runtime_evidence_failure
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_execution_scrapes_separate_actuator_loopback_origin
+
+  D9:
+    kind: decision
+    description: "Whether the initial resource sample already triggers a stop"
+    condition: "Heap ratio is strictly greater than its threshold, or another implemented resource stop condition returns a stop"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: evaluate_resource_stop
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_cpu_and_memory_thresholds_are_strict_greater_than
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_execution_scrapes_separate_actuator_loopback_origin
+
+  A2:
+    kind: action
+    description: "Build the enabled-layer warm-up and stable invocation order and partition the L2 document pool into disjoint invocation-scoped pools"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: execute_workflow
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: partition_unique_document_ids
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_document_pool_partition_is_disjoint_and_complete
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_example_profile_is_safe_and_valid
+
+  A9:
+    kind: action
+    description: "Select the next ordered warm-up or stable invocation for an enabled L1-L3 layer"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: execute_workflow
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_example_profile_is_safe_and_valid
+
+  A3:
+    kind: action
+    description: "Verify snapshot and JMeter-launcher hashes, read the zero-external-call counter, run one JMeter invocation while sampling CPU and heap, then verify hashes and counter again"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: external_call_counter
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: run_jmeter_invocation
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: jmeter_arguments
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: runtime_artifacts_are_stable
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_zero_budget_execution_requires_measurable_zero_external_calls
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_jmeter_command_has_no_token_payload_or_business_id
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_execution_marks_snapshot_drift_invalid_after_invocation
+
+  D10:
+    kind: decision
+    description: "Which pre-run-authorized JMX layer handles the current invocation"
+    condition: "After profile and execution gates have rejected L4, PERF_LAYER is L1, L2 or L3; no executable L4 branch exists"
+    code:
+      - path: backend/evals/performance/rag-layered-performance.jmx
+        symbol: L1 branch
+      - path: backend/evals/performance/rag-layered-performance.jmx
+        symbol: L2 branch
+      - path: backend/evals/performance/rag-layered-performance.jmx
+        symbol: L3 branch
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_jmx_xml_and_key_samplers
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_l4_is_always_rejected
+
+  A4:
+    kind: action
+    description: "Execute L1 through the protected retrieval probe and require HTTP 200 with degraded exactly false and status exactly success"
+    code:
+      - path: backend/evals/performance/rag-layered-performance.jmx
+        symbol: L1-retrieval
+      - path: backend/src/main/java/com/rag/backend/observability/performance/RetrievalPerformanceProbeController.java
+        symbol: retrieve
+      - path: backend/src/main/java/com/rag/backend/observability/performance/RetrievalPerformanceProbeResponse.java
+        symbol: from
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_jmx_xml_and_key_samplers
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_validate_jmx_rejects_weakened_health_or_answer_assertions
+      - path: backend/src/test/java/com/rag/backend/observability/performance/RetrievalPerformanceProbeControllerTest.java
+        symbol: authorizedProbeReturnsOnlySanitizedAggregates
+    external_call:
+      system: "loopback Backend retrieval path"
+      timeout: "5 second connect and 30 second response timeout"
+      failure_behavior: "JMeter records a failed sample; no automatic request retry"
+      failure_nodes: [D11]
+
+  A5:
+    kind: action
+    description: "Execute L2 by atomically consuming one unique disposable document ID, requiring a non-reused 202 submission, and polling the job to terminal or deadline"
+    code:
+      - path: backend/evals/performance/rag-layered-performance.jmx
+        symbol: L2-acquire-unique-document
+      - path: backend/evals/performance/rag-layered-performance.jmx
+        symbol: L2-ingest-submit
+      - path: backend/evals/performance/rag-layered-performance.jmx
+        symbol: L2-ingest-poll
+      - path: backend/evals/performance/rag-layered-performance.jmx
+        symbol: L2-terminal-check
+      - path: backend/src/main/java/com/rag/backend/document/DocumentController.java
+        symbol: ingest
+      - path: backend/src/main/java/com/rag/backend/ingestionlab/job/IngestJobController.java
+        symbol: getJob
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_l2_rejects_duplicate_or_undersized_document_pool
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_document_pool_partition_is_disjoint_and_complete
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_jmx_xml_and_key_samplers
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_token_and_payloads_are_environment_only
+    external_call:
+      system: "loopback Backend asynchronous ingestion and its already-running local dependencies"
+      timeout: "30 second HTTP response timeout and profile-bounded terminal poll deadline"
+      failure_behavior: "FAILED, CANCELLED or deadline becomes a failed sample; reused jobs, pool exhaustion or insufficient duration fail runtime evidence; submission is never retried"
+      failure_nodes: [D11, D13]
+
+  A6:
+    kind: action
+    description: "Execute L3 with no fixed session ID and require HTTP 200 with evidence decision exactly ANSWER"
+    code:
+      - path: backend/evals/performance/rag-layered-performance.jmx
+        symbol: L3-chat
+      - path: backend/src/main/java/com/rag/backend/agent/controller/RagChatController.java
+        symbol: chat
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: runtime_environment_errors
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_l3_requires_a_fresh_session_per_request
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_jmx_xml_and_key_samplers
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_validate_jmx_rejects_weakened_health_or_answer_assertions
+    external_call:
+      system: "loopback Backend chat path configured to keep the external-call counter unchanged"
+      timeout: "5 second connect and 120 second response timeout"
+      failure_behavior: "JMeter records a failed sample; provider-budgeted execution is rejected and no automatic request retry occurs"
+      failure_nodes: [D11]
+
+  A7:
+    kind: action
+    description: "Record Backend span END duration through monotonic time and low-cardinality operation/result metrics; these metrics are not scraped into report samplerMetrics"
+    code:
+      - path: backend/src/main/java/com/rag/backend/observability/trace/TraceContextService.java
+        symbol: open
+      - path: backend/src/main/java/com/rag/backend/observability/trace/TraceContextService.java
+        symbol: close
+      - path: backend/src/main/java/com/rag/backend/observability/trace/TraceContextService.java
+        symbol: emit
+      - path: backend/src/main/java/com/rag/backend/observability/performance/TracePerformanceMetrics.java
+        symbol: recordSpanDuration
+    tests:
+      - path: backend/src/test/java/com/rag/backend/observability/TraceContextDurationTest.java
+        symbol: onlyEndEventCarriesDeterministicMonotonicDuration
+      - path: backend/src/test/java/com/rag/backend/observability/TraceContextDurationTest.java
+        symbol: negativeClockDeltaIsClampedToZero
+      - path: backend/src/test/java/com/rag/backend/observability/TraceContextDurationTest.java
+        symbol: monotonicClockFailureFallsBackToZeroWithoutBreakingScope
+      - path: backend/src/test/java/com/rag/backend/observability/performance/TracePerformanceMetricsTest.java
+        symbol: endSpanRecordsOnlySafeOperationAndResultTags
+      - path: backend/src/test/java/com/rag/backend/observability/performance/TracePerformanceMetricsTest.java
+        symbol: registryFailureCannotChangeSpanResultOrCleanup
+
+  D11:
+    kind: decision
+    description: "Whether invocation, artifact, resource and zero-external-call evidence is usable"
+    condition: "The frozen snapshots and JMeter launcher remain hash-stable before and after invocation, JMeter and resource sampling complete or return an implemented resource stop, and the zero-external-call counter is readable and unchanged"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: run_jmeter_invocation
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: external_call_counter
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: execute_workflow
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_zero_budget_execution_requires_measurable_zero_external_calls
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_missing_actuator_is_a_runtime_evidence_failure
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_execution_scrapes_separate_actuator_loopback_origin
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_execution_marks_snapshot_drift_invalid_after_invocation
+
+  D12:
+    kind: decision
+    description: "Whether the completed invocation is warm-up or stable-state measurement"
+    condition: "execute_workflow is in the per-layer warm-up branch or the configured concurrency loop"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: execute_workflow
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_example_profile_is_safe_and_valid
+
+  D13:
+    kind: decision
+    description: "Whether warm-up produced sufficient, non-reused primary evidence"
+    condition: "A primary sample exists; for L2 no 597 reuse or 598 exhaustion occurred; invocation and primary span cover at least 90 percent; every thread joins near the start, remains evidenced through the tail, and has no unsupported inactive gap"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: read_jtl
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: sample_coverage_seconds
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: require_window_evidence
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: execute_workflow
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_csv_jtl_aggregation
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_l2_rejects_duplicate_or_undersized_document_pool
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_window_evidence_requires_real_duration_and_every_thread
+
+  A8:
+    kind: action
+    description: "Aggregate privacy-safe stable JTL primary and sampler-label rows into nearest-rank latency, throughput, error, 429 and 5xx metrics"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: aggregate_jtl
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: aggregate_samples
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: nearest_rank
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_nearest_rank_percentiles
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_error_throughput_and_status_aggregation
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_csv_jtl_aggregation
+
+  D14:
+    kind: decision
+    description: "Whether a stable window triggers an HTTP or latency stop"
+    condition: "Any sampler has HTTP 429, primary error rate exceeds the configured threshold, or P99 exceeds the lowest-concurrency multiplier for the required consecutive analysis windows"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: evaluate_window_stop
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: consecutive_window_p99_breach
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_any_429_stops_even_when_primary_sampler_is_clean
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_p99_requires_consecutive_windows
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_error_throughput_and_status_aggregation
+
+  D15:
+    kind: decision
+    description: "Whether another configured warm-up or stable invocation remains"
+    condition: "The enabled-layer loop and concurrency list still contain an invocation"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: execute_workflow
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_example_profile_is_safe_and_valid
+
+  A10:
+    kind: action
+    description: "Prepare a FAILED RUNTIME report after a caught RuntimeEvidenceError"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: base_report
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: execute_workflow
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_missing_actuator_is_a_runtime_evidence_failure
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_report_schema_versions_required_status_and_evidence_fields
+
+  A11:
+    kind: action
+    description: "Prepare a STOPPED RUNTIME report with the exact resource or window stop reason"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: execute_workflow
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: evaluate_resource_stop
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: evaluate_window_stop
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_execution_scrapes_separate_actuator_loopback_origin
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_cpu_and_memory_thresholds_are_strict_greater_than
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_any_429_stops_even_when_primary_sampler_is_clean
+
+  A12:
+    kind: action
+    description: "Prepare a COMPLETED RUNTIME report after every configured invocation finishes"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: execute_workflow
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_report_schema_versions_required_status_and_evidence_fields
+
+  D16:
+    kind: decision
+    description: "Recheck final runtime identity and source/artifact/Git/JMeter stability, rewriting drift to a FAILED and INVALID terminal tuple before report validation and exclusive creation"
+    condition: "A final identity failure sets stopReason RUNTIME_IDENTITY; any final source, snapshot, Git or JMeter-launcher drift sets SOURCE_DRIFT and takes precedence; after reconciliation, report cross-fields and performance-report.json open mode x must succeed"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: actuator_runtime_build_fingerprint
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: write_report_exclusive
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: validate_report_shape
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_run_directory_and_report_are_exclusive_create
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_report_refuses_sensitive_field_and_contains_no_supplied_secret
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_report_rejects_impossible_runtime_status_combinations
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_execution_marks_snapshot_drift_invalid_after_invocation
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_execution_marks_source_artifact_drift_invalid
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_runtime_build_identity_is_read_live_from_actuator_info
+
+  D17:
+    kind: decision
+    description: "Whether the reconciled report validates and is exclusive-created, and which authoritative runStatus it contains"
+    condition: "Report validation and performance-report.json open mode x succeed with runStatus COMPLETED, STOPPED or FAILED; otherwise no state transition occurs and the run directory remains incomplete"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: validate_report_shape
+      - path: backend/evals/performance/performance-report-v1.schema.json
+        symbol: runStatus
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: write_report_exclusive
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_report_schema_versions_required_status_and_evidence_fields
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: EvidenceAndOutputTests
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_run_directory_and_report_are_exclusive_create
+
+  T2:
+    kind: transition
+    description: "Persist the exclusive final report with runStatus COMPLETED"
+    entity: LayeredPerformanceRunArtifact
+    from: RUN_DIRECTORY_EXISTS
+    to: COMPLETED
+    trigger: "all configured invocations completed and final report open mode x succeeded"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: execute_workflow
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: write_report_exclusive
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_report_schema_versions_required_status_and_evidence_fields
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_run_directory_and_report_are_exclusive_create
+
+  T3:
+    kind: transition
+    description: "Persist the exclusive final report with runStatus STOPPED"
+    entity: LayeredPerformanceRunArtifact
+    from: RUN_DIRECTORY_EXISTS
+    to: STOPPED
+    trigger: "resource or stable-window stop condition triggered and final report open mode x succeeded"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: execute_workflow
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: write_report_exclusive
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_execution_scrapes_separate_actuator_loopback_origin
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_cpu_and_memory_thresholds_are_strict_greater_than
+
+  T4:
+    kind: transition
+    description: "Persist the exclusive reconciled final report with runStatus FAILED and runtimeEvidenceStatus INVALID"
+    entity: LayeredPerformanceRunArtifact
+    from: RUN_DIRECTORY_EXISTS
+    to: FAILED
+    trigger: "RuntimeEvidenceError was caught, or final runtime identity/source/artifact/Git/JMeter evidence drifted, and the reconciled FAILED/INVALID report validated and open mode x succeeded"
+    failure_behavior: "Final identity failure uses RUNTIME_IDENTITY; source/artifact/Git/JMeter drift uses SOURCE_DRIFT and overrides an identity reason; if report validation or exclusive creation fails, T4 does not occur and the directory remains without an authoritative terminal report"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: execute_workflow
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: write_report_exclusive
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_missing_actuator_is_a_runtime_evidence_failure
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_report_schema_versions_required_status_and_evidence_fields
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_execution_marks_source_artifact_drift_invalid
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_execution_marks_snapshot_drift_invalid_after_invocation
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_runtime_build_identity_is_read_live_from_actuator_info
+
+  G1:
+    kind: safeguard
+    description: "Validate-only default and explicit execution double gate"
+    safeguard_type: authorization
+    guarantee: "Without both CLI --execute and profile execution.enabled=true, the workflow sends zero HTTP requests, starts no JMeter workload and creates no run directory"
+    protects: [D1, A1, D4]
+    failure_behavior: "Return NOT_RUN static evidence or reject before output creation"
+    code:
+      - path: backend/evals/performance/run_performance.py
+        symbol: main
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: validate_only
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: validate_execution_gate
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_powershell_wrapper_only_dispatches_python_and_defaults_to_validation
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_validate_only_does_not_call_http_or_create_output
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_execution_requires_cli_and_profile_double_gate
+
+  G2:
+    kind: safeguard
+    description: "L4 rejection and deferral"
+    safeguard_type: authorization
+    guarantee: "Profile validation, execution validation and JMX dispatch cannot generate L4 traffic or evidence"
+    protects: [D3, D10, X3]
+    failure_behavior: "Reject during profile/execution pre-run validation before run creation; the JMX dispatch contains only L1-L3 branches, so no ordinary or fallback L4 execution path exists"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: profile_errors
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: execution_gate_errors
+      - path: backend/evals/performance/rag-layered-performance.jmx
+        symbol: PERF_LAYER
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_l4_is_always_rejected
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_jmx_xml_and_key_samplers
+
+  G3:
+    kind: safeguard
+    description: "Loopback, default-off probe and token boundary"
+    safeguard_type: authentication
+    guarantee: "Backend and Actuator origins are loopback; the L1 Controller is absent unless explicitly enabled and then requires the actual Servlet source to be loopback plus a constant-time matching nonblank token"
+    protects: [D4, A4]
+    failure_behavior: "Reject before runtime or return 403/401 without calling the retriever; invalid payload returns 400 and retrieval failure returns sanitized 503"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: is_loopback_base_url
+      - path: backend/src/main/resources/application-performance.yml
+        symbol: rag.performance
+      - path: backend/src/main/java/com/rag/backend/observability/performance/RetrievalPerformanceProbeController.java
+        symbol: retrieve
+      - path: backend/src/main/java/com/rag/backend/observability/performance/RetrievalPerformanceProbeController.java
+        symbol: authorized
+      - path: backend/src/main/java/com/rag/backend/observability/performance/RetrievalPerformanceProbeController.java
+        symbol: isLoopback
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_execution_requires_loopback_and_disposable_state
+      - path: backend/src/test/java/com/rag/backend/observability/performance/RetrievalPerformanceProbeConfigurationTest.java
+        symbol: controllerIsAbsentUnlessProbeIsExplicitlyEnabled
+      - path: backend/src/test/java/com/rag/backend/observability/performance/RetrievalPerformanceProbeConfigurationTest.java
+        symbol: performanceProfileIsLoopbackOnlyAndFailClosed
+      - path: backend/src/test/java/com/rag/backend/observability/performance/RetrievalPerformanceProbeControllerTest.java
+        symbol: missingOrWrongTokenReturnsUnauthorizedWithoutRetrieval
+      - path: backend/src/test/java/com/rag/backend/observability/performance/RetrievalPerformanceProbeControllerTest.java
+        symbol: nonLoopbackSourceIsForbiddenEvenWithSpoofedForwardingHeader
+      - path: backend/src/test/java/com/rag/backend/observability/performance/RetrievalPerformanceProbeControllerTest.java
+        symbol: invalidBoundsReturnBadRequestWithoutRetrieval
+      - path: backend/src/test/java/com/rag/backend/observability/performance/RetrievalPerformanceProbeControllerTest.java
+        symbol: retrievalFailureReturnsGenericStatusWithoutLeakingMessage
+
+  G4:
+    kind: safeguard
+    description: "Environment-only secrets, workload fingerprint and disposable workload isolation"
+    safeguard_type: privacy
+    guarantee: "Tokens, query/question bodies and business IDs are absent from profile, command, JTL and report; the environment payloads, ID pool and declared scale match the authorized workload fingerprint; L2 IDs are unique and disjoint across invocations, and L3 rejects a non-null fixed session ID"
+    protects: [D5, A5, A6]
+    failure_behavior: "Reject before execution, fail L2 evidence on reuse/exhaustion, and never auto-delete or compensate operator-owned disposable state"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: runtime_environment_errors
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: verify_runtime_fixture_fingerprint
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: partition_unique_document_ids
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: validate_jmx
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: jmeter_arguments
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_profile_rejects_payload_or_business_id_fields
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_runtime_values_are_environment_only_and_shape_checked
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_runtime_fixture_fingerprint_binds_payloads_and_scale_without_persisting_them
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_l2_rejects_duplicate_or_undersized_document_pool
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_document_pool_partition_is_disjoint_and_complete
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_l3_requires_a_fresh_session_per_request
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_jtl_never_saves_bodies_headers_url_or_assertion_messages
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_report_refuses_sensitive_field_and_contains_no_supplied_secret
+
+  G5:
+    kind: safeguard
+    description: "Measured zero external calls and honest unmeasured provider usage"
+    safeguard_type: validation
+    guarantee: "Execution requires external mode disabled, budget zero and a readable counter unchanged around every invocation; provider-budgeted remains rejected and provider usage/cost remains explicitly unmeasured with null numeric values"
+    protects: [D4, A3, D11]
+    failure_behavior: "Reject before run when counter evidence is not configured; fail runtime evidence when the counter is unavailable or changes"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: external_policy_errors
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: execution_gate_errors
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: external_call_counter
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: base_report
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_external_budget_pair_is_fail_closed
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_zero_budget_execution_requires_measurable_zero_external_calls
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: EvidenceAndOutputTests
+
+  G6:
+    kind: safeguard
+    description: "Fingerprinted runtime identity and exclusive artifact boundary"
+    safeguard_type: integrity
+    guarantee: "Git HEAD and dirty content, profile/JMX/schema snapshots, frozen environment, JMeter version, launcher hash and live runtime build identity are attributed; runtime identity is checked before and after execution, snapshot and launcher hashes are checked around every invocation and at finalization; neither run directory nor final report can overwrite an existing path"
+    protects: [D7, T1, A3, D11, D16]
+    failure_behavior: "Final runtime identity failure produces FAILED/INVALID/RUNTIME_IDENTITY; source/artifact/Git/JMeter drift produces FAILED/INVALID/SOURCE_DRIFT and takes precedence; existing paths remain unchanged, and no initial manifest or automatic resume exists"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: git_snapshot
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: actuator_runtime_build_fingerprint
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: create_run_directory
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: write_report_exclusive
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: runtime_artifacts_are_stable
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_run_directory_and_report_are_exclusive_create
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_report_refuses_sensitive_field_and_contains_no_supplied_secret
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_execution_marks_snapshot_drift_invalid_after_invocation
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_execution_marks_source_artifact_drift_invalid
+
+  G7:
+    kind: safeguard
+    description: "Separated and truthful metric provenance"
+    safeguard_type: observability
+    guarantee: "Report samplerMetrics come only from JTL sampler labels, resource samples and external counter come only from separate loopback Actuator, and Backend TracePerformanceMetrics remains an internal operation/result metric that is never presented as report samplerMetrics"
+    protects: [A7, A8, D8]
+    failure_behavior: "Missing JTL or Actuator evidence fails runtime evidence; Trace sink, clock or metric-registry failure cannot alter business outcome or scope cleanup"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: aggregate_jtl
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: actuator_resource_sample
+      - path: backend/src/main/java/com/rag/backend/observability/trace/TraceContextService.java
+        symbol: emit
+      - path: backend/src/main/java/com/rag/backend/observability/performance/TracePerformanceMetrics.java
+        symbol: recordSpanDuration
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_csv_jtl_aggregation
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_execution_scrapes_separate_actuator_loopback_origin
+      - path: backend/src/test/java/com/rag/backend/observability/TraceContextDurationTest.java
+        symbol: onlyEndEventCarriesDeterministicMonotonicDuration
+      - path: backend/src/test/java/com/rag/backend/observability/TraceContextDurationTest.java
+        symbol: monotonicClockFailureFallsBackToZeroWithoutBreakingScope
+      - path: backend/src/test/java/com/rag/backend/observability/performance/TracePerformanceMetricsTest.java
+        symbol: endSpanRecordsOnlySafeOperationAndResultTags
+      - path: backend/src/test/java/com/rag/backend/observability/performance/TracePerformanceMetricsTest.java
+        symbol: registryFailureCannotChangeSpanResultOrCleanup
+
+  G8:
+    kind: safeguard
+    description: "Predeclared bounded stop policy"
+    safeguard_type: validation
+    guarantee: "Memory stops immediately only when strictly above threshold; CPU stops only after a contiguous above-threshold sampled duration and resets at or below threshold; any 429, excessive error rate or consecutive-window P99 breach stops later invocations"
+    protects: [D9, D11, D14, A11]
+    failure_behavior: "Write a STOPPED report with exact stop reason and do not run remaining invocations"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: evaluate_resource_stop
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: evaluate_window_stop
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: consecutive_window_p99_breach
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_cpu_and_memory_thresholds_are_strict_greater_than
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_cpu_consecutive_duration_resets_at_threshold
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_any_429_stops_even_when_primary_sampler_is_clean
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_p99_requires_consecutive_windows
+
+  G9:
+    kind: safeguard
+    description: "Privacy-safe runtime evidence boundary with no extrapolation"
+    safeguard_type: validation
+    guarantee: "Warm-up is excluded; report status tuple, stop reason, completed result/thread collections and VALID resource evidence are cross-checked; report identifies RUNTIME rather than PRODUCTION evidence; STOPPED or FAILED is not a completed baseline; no result proves quality, external cost, production capacity or SLA"
+    protects: [A8, T2, T3, T4]
+    failure_behavior: "Reject an invalid report shape or sensitive field and preserve the explicitly unmeasured status with null numeric values rather than inventing evidence"
+    code:
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: base_report
+      - path: backend/evals/performance/performance_workflow.py
+        symbol: validate_report_shape
+      - path: backend/evals/performance/performance-report-v1.schema.json
+        symbol: evidenceLevel
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_report_schema_versions_required_status_and_evidence_fields
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: EvidenceAndOutputTests
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_report_refuses_sensitive_field_and_contains_no_supplied_secret
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_report_rejects_impossible_runtime_status_combinations
+
+  X1:
+    kind: outcome
+    description: "Validate-only succeeds"
+    result: "NOT_RUN, FIXTURE_STATIC and httpRequestsSent=0; no run directory or runtime-performance claim"
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_validate_only_does_not_call_http_or_create_output
+
+  X2:
+    kind: outcome
+    description: "Static or execution pre-run gate rejects"
+    result: "Non-zero safe error with no run directory, JMeter workload or HTTP side effect"
+
+  X3:
+    kind: outcome
+    description: "L4 is rejected and deferred"
+    result: "No L4 sampler, traffic, metric or evidence"
+
+  X4:
+    kind: outcome
+    description: "Exclusive run-directory creation fails"
+    result: "Non-zero error and existing directory remains untouched"
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_run_directory_and_report_are_exclusive_create
+
+  X5:
+    kind: outcome
+    description: "All configured local invocations complete"
+    result: "Exclusive performance-report.json with runStatus COMPLETED and RUNTIME evidence only"
+
+  X6:
+    kind: outcome
+    description: "A predeclared threshold stops the run"
+    result: "Exclusive performance-report.json with runStatus STOPPED, exact stopReason and bounded partial evidence"
+
+  X7:
+    kind: outcome
+    description: "Required runtime evidence fails"
+    result: "Exclusive performance-report.json with runStatus FAILED and runtimeEvidenceStatus INVALID; stopReason is RUNTIME_EVIDENCE, RUNTIME_IDENTITY or SOURCE_DRIFT according to the reconciled final cause"
+
+  X8:
+    kind: outcome
+    description: "An unhandled finalization, report validation or exclusive-write failure prevents the final report"
+    result: "The exclusive run directory may remain without an authoritative report; ordinary final runtime-identity or source/artifact drift is not this branch because it is reconciled into T4 first"
+    tests:
+      - path: backend/evals/performance/tests/test_performance_workflow.py
+        symbol: test_run_directory_and_report_are_exclusive_create

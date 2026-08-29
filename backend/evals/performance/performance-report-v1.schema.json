@@ -1,0 +1,201 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rag-study-assistant.local/schemas/performance-report-v1.schema.json",
+  "title": "RAG layered performance report",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "runStatus",
+    "evidenceLevel",
+    "runtimeEvidenceStatus",
+    "thresholdStatus",
+    "results",
+    "stopReason",
+    "resource",
+    "samplerMetrics",
+    "internalStageMetrics",
+    "providerUsage",
+    "provenance"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "runStatus": {
+      "enum": ["NOT_RUN", "COMPLETED", "STOPPED", "FAILED"]
+    },
+    "evidenceLevel": {
+      "enum": ["FIXTURE_STATIC", "RUNTIME", "PRODUCTION"]
+    },
+    "runtimeEvidenceStatus": {
+      "enum": ["NOT_RUN", "VALID", "INVALID"]
+    },
+    "thresholdStatus": {
+      "enum": ["NOT_EVALUATED", "WITHIN_PROFILE", "STOPPED_BY_THRESHOLD", "INVALID"]
+    },
+    "results": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/metricSet"}
+    },
+    "stopReason": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "required": ["kind", "detail"],
+          "properties": {
+            "kind": {"type": "string"},
+            "detail": {"type": "string"}
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "resource": {
+      "type": "object",
+      "required": ["status", "samples", "peakCpuRatio", "peakMemoryRatio", "failureReason"],
+      "properties": {
+        "status": {"enum": ["UNKNOWN", "MEASURED", "FAILED"]},
+        "samples": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["offsetSeconds", "cpuRatio", "memoryRatio"],
+            "properties": {
+              "offsetSeconds": {"type": "number", "minimum": 0},
+              "cpuRatio": {"type": "number", "minimum": 0},
+              "memoryRatio": {"type": "number", "minimum": 0}
+            },
+            "additionalProperties": false
+          }
+        },
+        "peakCpuRatio": {"type": ["number", "null"]},
+        "peakMemoryRatio": {"type": ["number", "null"]},
+        "failureReason": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    },
+    "samplerMetrics": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/metricSet"}
+    },
+    "internalStageMetrics": {
+      "type": "object",
+      "required": ["status", "metrics", "reason"],
+      "properties": {
+        "status": {"enum": ["NOT_COLLECTED", "MEASURED"]},
+        "metrics": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/metricSet"}
+        },
+        "reason": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    },
+    "providerUsage": {
+      "type": "object",
+      "required": [
+        "status",
+        "provider",
+        "model",
+        "requestCount",
+        "inputTokens",
+        "outputTokens",
+        "totalTokens",
+        "costUsd",
+        "pricingVersion"
+      ],
+      "properties": {
+        "status": {"enum": ["UNKNOWN", "MEASURED"]},
+        "provider": {"type": ["string", "null"]},
+        "model": {"type": ["string", "null"]},
+        "requestCount": {"type": ["integer", "null"], "minimum": 0},
+        "inputTokens": {"type": ["integer", "null"], "minimum": 0},
+        "outputTokens": {"type": ["integer", "null"], "minimum": 0},
+        "totalTokens": {"type": ["integer", "null"], "minimum": 0},
+        "costUsd": {"type": ["number", "null"], "minimum": 0},
+        "pricingVersion": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    },
+    "provenance": {
+      "type": "object",
+      "required": [
+        "gitHead",
+        "gitDirty",
+        "gitDirtyFingerprint",
+        "gitEndHead",
+        "gitEndDirty",
+        "gitEndDirtyFingerprint",
+        "sourceDriftStatus",
+        "profileSha256",
+        "jmxSha256",
+        "schemaSha256",
+        "fixtureFingerprintSha256",
+        "runtimeBuildFingerprintSha256",
+        "runtimeIdentityStatus",
+        "jmeterVersion",
+        "jmeterExecutableSha256",
+        "environment"
+      ],
+      "properties": {
+        "gitHead": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "gitDirty": {"type": "boolean"},
+        "gitDirtyFingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "gitEndHead": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "gitEndDirty": {"type": "boolean"},
+        "gitEndDirtyFingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "sourceDriftStatus": {"enum": ["STABLE", "DRIFTED"]},
+        "profileSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "jmxSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "schemaSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "fixtureFingerprintSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "runtimeBuildFingerprintSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "runtimeIdentityStatus": {"enum": ["NOT_CHECKED", "MATCHED", "FAILED"]},
+        "jmeterVersion": {"type": "string"},
+        "jmeterExecutableSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "environment": {"type": "object"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "metricSet": {
+      "type": "object",
+      "required": [
+        "layer",
+        "stage",
+        "concurrency",
+        "sampleCount",
+        "measurementDurationSeconds",
+        "observedSampleSpanSeconds",
+        "participatingThreads",
+        "p50Ms",
+        "p95Ms",
+        "p99Ms",
+        "percentileMethod",
+        "throughputPerSecond",
+        "errorRate",
+        "http429Count",
+        "http5xxCount"
+      ],
+      "properties": {
+        "layer": {"enum": ["L1", "L2", "L3"]},
+        "stage": {"type": "string"},
+        "concurrency": {"type": "integer", "minimum": 1},
+        "sampleCount": {"type": "integer", "minimum": 0},
+        "measurementDurationSeconds": {"type": "number", "minimum": 0},
+        "observedSampleSpanSeconds": {"type": "number", "minimum": 0},
+        "participatingThreads": {"type": "integer", "minimum": 0},
+        "p50Ms": {"type": ["number", "null"]},
+        "p95Ms": {"type": ["number", "null"]},
+        "p99Ms": {"type": ["number", "null"]},
+        "percentileMethod": {"const": "nearest-rank"},
+        "throughputPerSecond": {"type": "number", "minimum": 0},
+        "errorRate": {"type": "number", "minimum": 0, "maximum": 1},
+        "http429Count": {"type": "integer", "minimum": 0},
+        "http5xxCount": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -4,9 +4,16 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.rag.backend.agent.evaluation.Answerability;
+import com.rag.backend.agent.evaluation.CaseRetrievalMetrics;
+import com.rag.backend.agent.evaluation.RetrievalEvalReport;
+import com.rag.backend.agent.evaluation.RetrievalGroundTruth;
+import com.rag.backend.agent.evaluation.RetrievalMetricsAccumulator;
+import com.rag.backend.agent.evaluation.RetrievalMetricsCalculator;
 import com.rag.backend.agent.embedding.EmbeddingClient;
 import com.rag.backend.agent.model.KnowledgeChunk;
 import com.rag.backend.agent.repository.KnowledgeChunkRepository;
+import com.rag.backend.agent.rerank.KnowledgeReranker;
 import com.rag.backend.agent.rerank.LocalLexicalKnowledgeReranker;
 import com.rag.backend.agent.retrieval.MilvusKnowledgeRetriever;
 import com.rag.backend.agent.retrieval.RetrievedChunk;
@@ -62,6 +69,8 @@ class LocalObsidianRetrievalEvalTest {
     private static final int BATCH_SIZE = 32;
     private static final int CANDIDATE_K = 20;
     private static final int TOP_K = 10;
+    static final String REVIEWED_DEV45_CASE_FILE =
+            "standard_reviewed_100_retrieval_dev.jsonl";
     private final ObjectMapper json = new ObjectMapper();
 
     @Test
@@ -72,86 +81,23 @@ class LocalObsidianRetrievalEvalTest {
         String caseFileName = System.getProperty(
                 "rag.local.obsidian.caseFile",
                 "standard_reviewed_100_retrieval.jsonl");
-        // 外置私有数据集必须带 Manifest 并通过 Checksum/规模校验；缺失或不匹配即拒绝执行。
-        EvalFixtureSupport.validateLocalDatasetManifest(
-                datasetRoot, datasetRoot.resolve("manifest.json"));
-        List<CorpusRow> corpus = readCorpus(datasetRoot.resolve("corpus.jsonl"));
-        List<ObsidianEvalCase> cases = readCases(datasetRoot.resolve(caseFileName));
-        assertFalse(corpus.isEmpty(), "本地 Obsidian corpus 不能为空");
-        assertFalse(cases.isEmpty(), "本地 Obsidian 检索 case 不能为空");
+        PreparedFixture fixture = prepareFixture(
+                datasetRoot, caseFileName, CANDIDATE_K,
+                new LocalLexicalKnowledgeReranker(0.7, 0.3), false);
+        List<CorpusRow> corpus = fixture.corpus();
+        List<ObsidianEvalCase> cases = fixture.cases();
+        IdMapping mapping = fixture.mapping();
+        String baseUrl = fixture.baseUrl();
+        String model = fixture.model();
+        String queryMode = fixture.queryMode();
+        ObsidianEmbeddingGateway embeddingGateway = fixture.embeddingGateway();
+        Map<Long, List<Double>> corpusEmbeddings = fixture.corpusEmbeddings();
+        MilvusKnowledgeRetriever retriever = fixture.retriever();
+        Map<Long, Long> sourceByChunkId = fixture.sourceByChunkId();
 
-        String baseUrl = requiredEnv("RAG_EVAL_EMBEDDING_BASE_URL");
-        String model = requiredEnv("RAG_EVAL_EMBEDDING_MODEL");
-        String apiKey = requiredEnv("RAG_EVAL_EMBEDDING_API_KEY");
-        String queryMode = System.getProperty(
-                "rag.eval.queryMode", "replay").trim().toLowerCase();
-        if (!"live".equals(queryMode) && !"replay".equals(queryMode)) {
-            throw new IllegalArgumentException("rag.eval.queryMode 只允许 live 或 replay");
-        }
-
-        // chunk_id 与 source_document 都是稳定字符串；为 Milvus 生成冻结排序后的 long 序号。
-        IdMapping mapping = buildIdMapping(corpus, cases);
-        Path embeddingCache = Path.of(System.getProperty(
-                "rag.eval.embeddingCache",
-                ".cache/local-obsidian-eval/corpus-embeddings.jsonl"));
-        ObsidianEmbeddingGateway embeddingGateway = new ObsidianEmbeddingGateway(
-                json, baseUrl, model, apiKey, DIMENSION, embeddingCache);
-
-        Map<Long, List<Double>> corpusEmbeddings =
-                embeddingGateway.embedCorpus(corpus, mapping, BATCH_SIZE);
-        FixtureChunkRepository chunks = new FixtureChunkRepository();
-        MilvusConsistentVectorStore vectorStore = new MilvusConsistentVectorStore(
-                System.getProperty("rag.eval.milvusHost", "127.0.0.1"),
-                Integer.parseInt(System.getProperty("rag.eval.milvusPort", "39530")),
-                System.getProperty(
-                        "rag.eval.milvusCollection", "rag_obsidian_v3_eval_v1"),
-                DIMENSION,
-                System.getProperty("rag.eval.milvusIndexType", "FLAT"));
-
-        for (CorpusRow row : corpus) {
-            long chunkId = mapping.chunkIdToLong(row.chunkIdText());
-            KnowledgeChunk chunk = new KnowledgeChunk();
-            chunk.setId(chunkId);
-            chunk.setCourseId(COURSE_ID);
-            chunk.setDocumentId(mapping.documentIdToLong(row.sourceDocument()));
-            chunk.setDocumentVersionId(ACTIVE_VERSION_ID);
-            chunk.setChunkIndex(0);
-            chunk.setTitle(row.title());
-            chunk.setContent(row.content());
-            chunk.setSourcePage(1);
-            chunks.save(chunk);
-            vectorStore.upsert(new ConsistentVectorStore.VectorRecord(
-                    chunkId,
-                    chunkId,
-                    COURSE_ID,
-                    mapping.documentIdToLong(row.sourceDocument()),
-                    ACTIVE_VERSION_ID,
-                    row.chunkIdText(),
-                    StableHash.sha256(row.content()),
-                    model,
-                    DIMENSION,
-                    corpusEmbeddings.get(chunkId)));
-        }
-
-        // Milvus 写入成功返回不等于 search 可见；固定批次边界 flush 并确认全部 chunk 可见。
-        vectorStore.flush(Duration.ofSeconds(60).toMillis());
-        awaitVersionVisible(vectorStore, corpus.size(), Duration.ofSeconds(60));
-
-        EmbeddingClient queryEmbedding = "live".equals(queryMode)
-                ? embeddingGateway::embedLiveQuery
-                : embeddingGateway::embedReplayQuery;
-        MilvusKnowledgeRetriever retriever = new MilvusKnowledgeRetriever(
-                queryEmbedding,
-                ignored -> Set.of(ACTIVE_VERSION_ID),
-                vectorStore,
-                chunks,
-                null,
-                new LocalLexicalKnowledgeReranker(0.7, 0.3),
-                -1.0,
-                CANDIDATE_K);
-
+        RetrievalMetricsCalculator metricsCore = new RetrievalMetricsCalculator();
         List<Map<String, Object>> caseReports = new ArrayList<>();
-        MetricBucket overall = new MetricBucket();
+        MetricBucket overall = new MetricBucket(metricsCore);
         Map<String, MetricBucket> byType = new TreeMap<>();
         Map<String, MetricBucket> bySplit = new TreeMap<>();
         try {
@@ -170,14 +116,22 @@ class LocalObsidianRetrievalEvalTest {
                 List<Long> relevantIds = evalCase.relevantIds(mapping);
                 List<Long> acceptableIds = evalCase.acceptableIds(mapping);
                 List<Long> confusingIds = evalCase.confusingIds(mapping);
+                RetrievalGroundTruth groundTruth = groundTruth(
+                        evalCase, relevantIds, acceptableIds, mapping, sourceByChunkId);
+                Map<Integer, CaseRetrievalMetrics> canonicalMetrics = Map.of(
+                        1, metricsCore.evaluateCase(groundTruth, rankedChunkIds, 1),
+                        3, metricsCore.evaluateCase(groundTruth, rankedChunkIds, 3),
+                        5, metricsCore.evaluateCase(groundTruth, rankedChunkIds, 5),
+                        10, metricsCore.evaluateCase(groundTruth, rankedChunkIds, 10));
                 Map<String, Object> caseMetrics = metrics(
-                        rankedChunkIds, rankedDocumentIds, evalCase, relevantIds,
-                        acceptableIds, confusingIds, mapping);
-                overall.add(evalCase, caseMetrics, latencyMs);
-                byType.computeIfAbsent(evalCase.questionType(), k -> new MetricBucket())
-                        .add(evalCase, caseMetrics, latencyMs);
-                bySplit.computeIfAbsent(evalCase.split(), k -> new MetricBucket())
-                        .add(evalCase, caseMetrics, latencyMs);
+                        evalCase, acceptableIds, confusingIds, canonicalMetrics);
+                overall.add(groundTruth, canonicalMetrics, caseMetrics, latencyMs);
+                byType.computeIfAbsent(evalCase.questionType(),
+                                k -> new MetricBucket(metricsCore))
+                        .add(groundTruth, canonicalMetrics, caseMetrics, latencyMs);
+                bySplit.computeIfAbsent(evalCase.split(),
+                                k -> new MetricBucket(metricsCore))
+                        .add(groundTruth, canonicalMetrics, caseMetrics, latencyMs);
 
                 Map<String, Object> caseReport = new LinkedHashMap<>();
                 caseReport.put("caseId", evalCase.caseId());
@@ -255,46 +209,173 @@ class LocalObsidianRetrievalEvalTest {
             }
             json.writerWithDefaultPrettyPrinter().writeValue(output.toFile(), report);
         } finally {
-            vectorStore.deleteByVersion(ACTIVE_VERSION_ID);
+            fixture.close();
         }
 
         assertEquals(corpus.size(), corpusEmbeddings.size(),
                 "每篇 corpus chunk 都必须有真实 BGE-M3 向量");
     }
 
+    /**
+     * Step 3.1 的唯一候选捕获边界。它只接受 reviewed Dev45，且在任何 Embedding/Milvus
+     * 操作前拒绝 Test55、全量或未知 case 文件。捕获器位于 Rerank 输入处，因此每个 case
+     * 只经历一次真实 CandidateK 生成，后续三臂只能重排该不可变列表。
+     */
+    static CapturedDev45Candidates captureDev45Candidates(
+            Path datasetRoot, String caseFileName, int candidateK, int finalK)
+            throws Exception {
+        requireDev45CaseFile(caseFileName);
+        if (candidateK <= 0 || finalK <= 0 || candidateK < finalK) {
+            throw new IllegalArgumentException("CandidateK must be >= FinalK > 0");
+        }
+        LocalObsidianRetrievalEvalTest harness =
+                new LocalObsidianRetrievalEvalTest();
+        CapturingNoOpReranker capture = new CapturingNoOpReranker();
+        PreparedFixture fixture = harness.prepareFixture(
+                datasetRoot, caseFileName, candidateK, capture, true);
+        try {
+            List<CapturedDev45Case> results = new ArrayList<>();
+            for (ObsidianEvalCase evalCase : fixture.cases()) {
+                capture.beginCase();
+                fixture.retriever().retrieve(COURSE_ID, evalCase.question(), finalK);
+                List<RetrievedChunk> frozen = capture.finishCase();
+                RetrievalGroundTruth truth = harness.groundTruth(
+                        evalCase,
+                        evalCase.relevantIds(fixture.mapping()),
+                        evalCase.acceptableIds(fixture.mapping()),
+                        fixture.mapping(), fixture.sourceByChunkId());
+                results.add(new CapturedDev45Case(
+                        evalCase.caseId(), evalCase.question(), truth, frozen));
+            }
+            return new CapturedDev45Candidates(candidateK, finalK, results);
+        } finally {
+            fixture.close();
+        }
+    }
+
+    static void requireDev45CaseFile(String caseFileName) {
+        if (!REVIEWED_DEV45_CASE_FILE.equals(caseFileName)) {
+            throw new IllegalArgumentException(
+                    "Step 3.1 only permits the explicit reviewed Dev45 case file");
+        }
+    }
+
+    private PreparedFixture prepareFixture(
+            Path datasetRoot,
+            String caseFileName,
+            int candidateK,
+            KnowledgeReranker reranker,
+            boolean requireDev45) throws Exception {
+        EvalFixtureSupport.validateLocalDatasetManifest(
+                datasetRoot, datasetRoot.resolve("manifest.json"));
+        List<CorpusRow> corpus = readCorpus(datasetRoot.resolve("corpus.jsonl"));
+        List<ObsidianEvalCase> cases = readCases(datasetRoot.resolve(caseFileName));
+        assertFalse(corpus.isEmpty(), "本地 Obsidian corpus 不能为空");
+        assertFalse(cases.isEmpty(), "本地 Obsidian 检索 case 不能为空");
+        if (requireDev45 && (cases.size() != 45
+                || cases.stream().anyMatch(item -> !"dev".equals(item.split())))) {
+            throw new IllegalArgumentException(
+                    "Step 3.1 requires exactly 45 reviewed Dev cases");
+        }
+
+        String baseUrl = requiredEnv("RAG_EVAL_EMBEDDING_BASE_URL");
+        String model = requiredEnv("RAG_EVAL_EMBEDDING_MODEL");
+        String apiKey = requiredEnv("RAG_EVAL_EMBEDDING_API_KEY");
+        String queryMode = System.getProperty(
+                "rag.eval.queryMode", "replay").trim().toLowerCase();
+        if (!"live".equals(queryMode) && !"replay".equals(queryMode)) {
+            throw new IllegalArgumentException("rag.eval.queryMode 只允许 live 或 replay");
+        }
+
+        IdMapping mapping = buildIdMapping(corpus, cases);
+        Path embeddingCache = Path.of(System.getProperty(
+                "rag.eval.embeddingCache",
+                ".cache/local-obsidian-eval/corpus-embeddings.jsonl"));
+        ObsidianEmbeddingGateway embeddingGateway = new ObsidianEmbeddingGateway(
+                json, baseUrl, model, apiKey, DIMENSION, embeddingCache);
+        Map<Long, List<Double>> corpusEmbeddings =
+                embeddingGateway.embedCorpus(corpus, mapping, BATCH_SIZE);
+        FixtureChunkRepository chunks = new FixtureChunkRepository();
+        MilvusConsistentVectorStore vectorStore = new MilvusConsistentVectorStore(
+                System.getProperty("rag.eval.milvusHost", "127.0.0.1"),
+                Integer.parseInt(System.getProperty("rag.eval.milvusPort", "39530")),
+                System.getProperty(
+                        "rag.eval.milvusCollection", "rag_obsidian_v3_eval_v1"),
+                DIMENSION,
+                System.getProperty("rag.eval.milvusIndexType", "FLAT"));
+        try {
+            for (CorpusRow row : corpus) {
+                long chunkId = mapping.chunkIdToLong(row.chunkIdText());
+                KnowledgeChunk chunk = new KnowledgeChunk();
+                chunk.setId(chunkId);
+                chunk.setCourseId(COURSE_ID);
+                chunk.setDocumentId(mapping.documentIdToLong(row.sourceDocument()));
+                chunk.setDocumentVersionId(ACTIVE_VERSION_ID);
+                chunk.setChunkIndex(0);
+                chunk.setTitle(row.title());
+                chunk.setContent(row.content());
+                chunk.setSourcePage(1);
+                chunks.save(chunk);
+                vectorStore.upsert(new ConsistentVectorStore.VectorRecord(
+                        chunkId, chunkId, COURSE_ID,
+                        mapping.documentIdToLong(row.sourceDocument()),
+                        ACTIVE_VERSION_ID, row.chunkIdText(),
+                        StableHash.sha256(row.content()), model, DIMENSION,
+                        corpusEmbeddings.get(chunkId)));
+            }
+            vectorStore.flush(Duration.ofSeconds(60).toMillis());
+            awaitVersionVisible(vectorStore, corpus.size(), Duration.ofSeconds(60));
+            EmbeddingClient queryEmbedding = "live".equals(queryMode)
+                    ? embeddingGateway::embedLiveQuery
+                    : embeddingGateway::embedReplayQuery;
+            MilvusKnowledgeRetriever retriever = new MilvusKnowledgeRetriever(
+                    queryEmbedding, ignored -> Set.of(ACTIVE_VERSION_ID), vectorStore,
+                    chunks, null, reranker, -1.0, candidateK);
+            Map<Long, Long> sourceByChunkId = corpus.stream().collect(
+                    java.util.stream.Collectors.toUnmodifiableMap(
+                            row -> mapping.chunkIdToLong(row.chunkIdText()),
+                            row -> mapping.documentIdToLong(row.sourceDocument())));
+            return new PreparedFixture(
+                    corpus, cases, mapping, baseUrl, model, queryMode,
+                    embeddingGateway, corpusEmbeddings, retriever,
+                    sourceByChunkId, vectorStore);
+        } catch (Exception failure) {
+            vectorStore.deleteByVersion(ACTIVE_VERSION_ID);
+            throw failure;
+        }
+    }
+
     private Map<String, Object> metrics(
-            List<Long> rankedChunkIds,
-            List<Long> rankedDocumentIds,
             ObsidianEvalCase evalCase,
-            List<Long> relevantIds,
             List<Long> acceptableIds,
             List<Long> confusingIds,
-            IdMapping mapping) {
+            Map<Integer, CaseRetrievalMetrics> canonicalMetrics) {
+        CaseRetrievalMetrics at10 = canonicalMetrics.get(10);
         Map<String, Object> metrics = new LinkedHashMap<>();
-        metrics.put("strictRecallAt1", recallAt(rankedChunkIds, relevantIds, 1));
-        metrics.put("strictRecallAt3", recallAt(rankedChunkIds, relevantIds, 3));
-        metrics.put("strictRecallAt5", recallAt(rankedChunkIds, relevantIds, 5));
-        metrics.put("strictRecallAt10", recallAt(rankedChunkIds, relevantIds, 10));
-        metrics.put("acceptableRecallAt1", recallAt(rankedChunkIds, acceptableIds, 1));
-        metrics.put("acceptableRecallAt3", recallAt(rankedChunkIds, acceptableIds, 3));
-        metrics.put("acceptableRecallAt5", recallAt(rankedChunkIds, acceptableIds, 5));
-        metrics.put("acceptableRecallAt10", recallAt(rankedChunkIds, acceptableIds, 10));
-        metrics.put("strictMrr", reciprocalRank(rankedChunkIds, relevantIds));
-        metrics.put("acceptableMrr", reciprocalRank(rankedChunkIds, acceptableIds));
-        metrics.put("strictNdcgAt10", ndcgAt(rankedChunkIds, relevantIds, 10));
-        metrics.put("acceptableNdcgAt10", ndcgAt(rankedChunkIds, acceptableIds, 10));
-        metrics.put("firstRelevantRank", firstRelevantRank(rankedChunkIds, acceptableIds));
-        metrics.put("sourceCoverageAt5", sourceCoverage(
-                rankedDocumentIds, evalCase.sourceDocumentIds(mapping), 5));
-        metrics.put("sourceCoverageAt10", sourceCoverage(
-                rankedDocumentIds, evalCase.sourceDocumentIds(mapping), 10));
-        metrics.put("evidenceGroupCoverageAt10", evidenceGroupCoverage(
-                rankedChunkIds, evalCase.requiredEvidenceGroupIds(mapping), 10));
-        metrics.put("misleadingRecall", misleadingRecall(rankedChunkIds, confusingIds));
-        metrics.put("returnedAnyChunk", !rankedChunkIds.isEmpty());
+        metrics.put("strictRecallAt1", canonicalMetrics.get(1).recallAtK());
+        metrics.put("strictRecallAt3", canonicalMetrics.get(3).recallAtK());
+        metrics.put("strictRecallAt5", canonicalMetrics.get(5).recallAtK());
+        metrics.put("strictRecallAt10", at10.recallAtK());
+        metrics.put("acceptableRecallAt1", canonicalMetrics.get(1).acceptableRecallAtK());
+        metrics.put("acceptableRecallAt3", canonicalMetrics.get(3).acceptableRecallAtK());
+        metrics.put("acceptableRecallAt5", canonicalMetrics.get(5).acceptableRecallAtK());
+        metrics.put("acceptableRecallAt10", at10.acceptableRecallAtK());
+        metrics.put("strictMrr", at10.reciprocalRank());
+        metrics.put("acceptableMrr", at10.acceptableReciprocalRank());
+        metrics.put("strictNdcgAt10", at10.ndcgAtK());
+        metrics.put("acceptableNdcgAt10", at10.acceptableNdcgAtK());
+        metrics.put("firstRelevantRank", firstRelevantRank(
+                at10.rankedChunkIds(), acceptableIds));
+        metrics.put("sourceCoverageAt5", canonicalMetrics.get(5).sourceCoverageAtK());
+        metrics.put("sourceCoverageAt10", at10.sourceCoverageAtK());
+        metrics.put("evidenceGroupCoverageAt10",
+                at10.requiredEvidenceGroupCoverageAtK());
+        metrics.put("misleadingRecall", misleadingRecall(
+                at10.rankedChunkIds(), confusingIds));
+        metrics.put("returnedAnyChunk", !at10.rankedChunkIds().isEmpty());
         metrics.put("unanswerablePrecision", evalCase.answerable()
                 ? -1.0
-                : (rankedChunkIds.isEmpty() ? 1.0 : 0.0));
+                : (at10.unanswerableFalsePositive() > 0.0 ? 0.0 : 1.0));
         return metrics;
     }
 
@@ -399,29 +480,25 @@ class LocalObsidianRetrievalEvalTest {
         return StableHash.sha256(new String(bytes, StandardCharsets.UTF_8));
     }
 
-    private double recallAt(List<Long> ranked, List<Long> relevant, int k) {
-        long hits = ranked.stream().limit(k).filter(relevant::contains).count();
-        return relevant.isEmpty() ? 0.0 : hits / (double) relevant.size();
-    }
-
-    private double reciprocalRank(List<Long> ranked, List<Long> relevant) {
-        for (int index = 0; index < ranked.size(); index++) {
-            if (relevant.contains(ranked.get(index))) return 1.0 / (index + 1.0);
-        }
-        return 0.0;
-    }
-
-    private double ndcgAt(List<Long> ranked, List<Long> relevant, int k) {
-        if (relevant.isEmpty()) return 0.0;
-        double dcg = 0.0;
-        for (int index = 0; index < Math.min(k, ranked.size()); index++) {
-            if (relevant.contains(ranked.get(index))) dcg += 1.0 / log2(index + 2.0);
-        }
-        double idcg = 0.0;
-        for (int index = 0; index < Math.min(k, relevant.size()); index++) {
-            idcg += 1.0 / log2(index + 2.0);
-        }
-        return idcg == 0.0 ? 0.0 : dcg / idcg;
+    private RetrievalGroundTruth groundTruth(
+            ObsidianEvalCase evalCase,
+            List<Long> relevantIds,
+            List<Long> acceptableIds,
+            IdMapping mapping,
+            Map<Long, Long> sourceByChunkId) {
+        List<Set<Long>> groups = evalCase.requiredEvidenceGroupIds(mapping).stream()
+                .map(Set::copyOf)
+                .toList();
+        return new RetrievalGroundTruth(
+                evalCase.caseId(),
+                evalCase.answerable()
+                        ? Answerability.ANSWERABLE
+                        : Answerability.UNANSWERABLE,
+                Set.copyOf(relevantIds),
+                Set.copyOf(acceptableIds),
+                groups,
+                sourceByChunkId,
+                Set.copyOf(evalCase.sourceDocumentIds(mapping)));
     }
 
     private double firstRelevantRank(List<Long> ranked, List<Long> relevant) {
@@ -431,30 +508,71 @@ class LocalObsidianRetrievalEvalTest {
         return 0.0;
     }
 
-    private double sourceCoverage(
-            List<Long> rankedDocuments, List<Long> requiredDocuments, int k) {
-        if (requiredDocuments.isEmpty()) return 0.0;
-        long covered = rankedDocuments.stream().limit(k).distinct()
-                .filter(requiredDocuments::contains).count();
-        return covered / (double) requiredDocuments.size();
-    }
-
-    private double evidenceGroupCoverage(
-            List<Long> rankedChunkIds, List<List<Long>> groups, int k) {
-        if (groups.isEmpty()) return 0.0;
-        List<Long> topK = rankedChunkIds.stream().limit(k).toList();
-        long covered = groups.stream().filter(group ->
-                group.stream().anyMatch(topK::contains)).count();
-        return covered / (double) groups.size();
-    }
-
     private double misleadingRecall(List<Long> ranked, List<Long> confusingIds) {
         if (confusingIds.isEmpty()) return 0.0;
         return ranked.stream().anyMatch(confusingIds::contains) ? 1.0 : 0.0;
     }
 
-    private double log2(double value) {
-        return Math.log(value) / Math.log(2.0);
+    record CapturedDev45Candidates(
+            int candidateK,
+            int finalK,
+            List<CapturedDev45Case> cases) {
+        CapturedDev45Candidates {
+            cases = List.copyOf(cases);
+        }
+    }
+
+    record CapturedDev45Case(
+            String caseId,
+            String query,
+            RetrievalGroundTruth groundTruth,
+            List<RetrievedChunk> frozenCandidates) {
+        CapturedDev45Case {
+            frozenCandidates = List.copyOf(frozenCandidates);
+        }
+    }
+
+    private record PreparedFixture(
+            List<CorpusRow> corpus,
+            List<ObsidianEvalCase> cases,
+            IdMapping mapping,
+            String baseUrl,
+            String model,
+            String queryMode,
+            ObsidianEmbeddingGateway embeddingGateway,
+            Map<Long, List<Double>> corpusEmbeddings,
+            MilvusKnowledgeRetriever retriever,
+            Map<Long, Long> sourceByChunkId,
+            MilvusConsistentVectorStore vectorStore) {
+        private void close() {
+            vectorStore.deleteByVersion(ACTIVE_VERSION_ID);
+        }
+    }
+
+    private static final class CapturingNoOpReranker implements KnowledgeReranker {
+        private List<RetrievedChunk> captured = List.of();
+        private int invocations;
+
+        private void beginCase() {
+            captured = List.of();
+            invocations = 0;
+        }
+
+        private List<RetrievedChunk> finishCase() {
+            if (invocations != 1) {
+                throw new IllegalStateException(
+                        "Step 3.1 must capture CandidateK exactly once per case");
+            }
+            return captured;
+        }
+
+        @Override
+        public List<RetrievedChunk> rerank(
+                String query, List<RetrievedChunk> chunks, int topK) {
+            invocations++;
+            captured = List.copyOf(chunks);
+            return List.copyOf(chunks);
+        }
     }
 
     private record CorpusRow(
@@ -767,89 +885,61 @@ class LocalObsidianRetrievalEvalTest {
     }
 
     private static final class MetricBucket {
-        private long count;
-        private double strictRecallAt1;
-        private double strictRecallAt3;
-        private double strictRecallAt5;
-        private double strictRecallAt10;
-        private double acceptableRecallAt5;
-        private double acceptableRecallAt10;
-        private double strictMrr;
-        private double acceptableMrr;
-        private double strictNdcgAt10;
-        private double acceptableNdcgAt10;
+        private final RetrievalMetricsCalculator metricsCore;
+        private final RetrievalMetricsAccumulator canonical =
+                new RetrievalMetricsAccumulator();
         private double firstRelevantRank;
-        private double sourceCoverageAt10;
-        private double evidenceGroupCoverageAt10;
         private double misleadingRecall;
-        private double unanswerablePrecisionSum;
-        private long unanswerableCount;
         private final List<Long> latencies = new ArrayList<>();
 
-        private void add(ObsidianEvalCase evalCase,
-                         Map<String, Object> metrics, long latencyMs) {
-            count++;
-            strictRecallAt1 += (double) metrics.get("strictRecallAt1");
-            strictRecallAt3 += (double) metrics.get("strictRecallAt3");
-            strictRecallAt5 += (double) metrics.get("strictRecallAt5");
-            strictRecallAt10 += (double) metrics.get("strictRecallAt10");
-            acceptableRecallAt5 += (double) metrics.get("acceptableRecallAt5");
-            acceptableRecallAt10 += (double) metrics.get("acceptableRecallAt10");
-            strictMrr += (double) metrics.get("strictMrr");
-            acceptableMrr += (double) metrics.get("acceptableMrr");
-            strictNdcgAt10 += (double) metrics.get("strictNdcgAt10");
-            acceptableNdcgAt10 += (double) metrics.get("acceptableNdcgAt10");
+        private MetricBucket(RetrievalMetricsCalculator metricsCore) {
+            this.metricsCore = metricsCore;
+        }
+
+        private void add(RetrievalGroundTruth groundTruth,
+                         Map<Integer, CaseRetrievalMetrics> canonicalMetrics,
+                         Map<String, Object> metrics,
+                         long latencyMs) {
+            canonical.add(groundTruth, canonicalMetrics);
             firstRelevantRank += (double) metrics.get("firstRelevantRank");
-            sourceCoverageAt10 += (double) metrics.get("sourceCoverageAt10");
-            evidenceGroupCoverageAt10 +=
-                    (double) metrics.get("evidenceGroupCoverageAt10");
             misleadingRecall += (double) metrics.get("misleadingRecall");
-            double unanswerablePrecision =
-                    (double) metrics.get("unanswerablePrecision");
-            if (unanswerablePrecision >= 0.0) {
-                unanswerablePrecisionSum += unanswerablePrecision;
-                unanswerableCount++;
-            }
             latencies.add(latencyMs);
         }
 
         private Map<String, Object> report() {
+            RetrievalEvalReport at1 = metricsCore.summarizeGroundTruth(
+                    canonical.groundTruths(), canonical.resultsAt(1), 1);
+            RetrievalEvalReport at3 = metricsCore.summarizeGroundTruth(
+                    canonical.groundTruths(), canonical.resultsAt(3), 3);
+            RetrievalEvalReport at5 = metricsCore.summarizeGroundTruth(
+                    canonical.groundTruths(), canonical.resultsAt(5), 5);
+            RetrievalEvalReport at10 = metricsCore.summarizeGroundTruth(
+                    canonical.groundTruths(), canonical.resultsAt(10), 10);
+            long count = canonical.size();
             List<Long> sorted = latencies.stream().sorted().toList();
             return Map.ofEntries(
                     Map.entry("caseCount", count),
-                    Map.entry("strictRecallAt1",
-                            count == 0 ? 0.0 : strictRecallAt1 / count),
-                    Map.entry("strictRecallAt3",
-                            count == 0 ? 0.0 : strictRecallAt3 / count),
-                    Map.entry("strictRecallAt5",
-                            count == 0 ? 0.0 : strictRecallAt5 / count),
-                    Map.entry("strictRecallAt10",
-                            count == 0 ? 0.0 : strictRecallAt10 / count),
-                    Map.entry("acceptableRecallAt5",
-                            count == 0 ? 0.0 : acceptableRecallAt5 / count),
-                    Map.entry("acceptableRecallAt10",
-                            count == 0 ? 0.0 : acceptableRecallAt10 / count),
-                    Map.entry("strictMrr",
-                            count == 0 ? 0.0 : strictMrr / count),
-                    Map.entry("acceptableMrr",
-                            count == 0 ? 0.0 : acceptableMrr / count),
-                    Map.entry("strictNdcgAt10",
-                            count == 0 ? 0.0 : strictNdcgAt10 / count),
-                    Map.entry("acceptableNdcgAt10",
-                            count == 0 ? 0.0 : acceptableNdcgAt10 / count),
+                    Map.entry("strictRecallAt1", at1.macroRecallAtK()),
+                    Map.entry("strictRecallAt3", at3.macroRecallAtK()),
+                    Map.entry("strictRecallAt5", at5.macroRecallAtK()),
+                    Map.entry("strictRecallAt10", at10.macroRecallAtK()),
+                    Map.entry("acceptableRecallAt5", at5.macroAcceptableRecallAtK()),
+                    Map.entry("acceptableRecallAt10", at10.macroAcceptableRecallAtK()),
+                    Map.entry("strictMrr", at10.meanReciprocalRank()),
+                    Map.entry("acceptableMrr", at10.meanAcceptableReciprocalRank()),
+                    Map.entry("strictNdcgAt10", at10.macroNdcgAtK()),
+                    Map.entry("acceptableNdcgAt10", at10.macroAcceptableNdcgAtK()),
                     Map.entry("firstRelevantRank",
                             count == 0 ? 0.0 : firstRelevantRank / count),
-                    Map.entry("sourceCoverageAt10",
-                            count == 0 ? 0.0 : sourceCoverageAt10 / count),
+                    Map.entry("sourceCoverageAt10", at10.macroSourceCoverageAtK()),
                     Map.entry("evidenceGroupCoverageAt10",
-                            count == 0 ? 0.0 : evidenceGroupCoverageAt10 / count),
+                            at10.macroRequiredEvidenceGroupCoverageAtK()),
                     Map.entry("misleadingRecall",
                             count == 0 ? 0.0 : misleadingRecall / count),
-                    Map.entry("unanswerableCaseCount", unanswerableCount),
+                    Map.entry("unanswerableCaseCount", at10.unanswerableCases()),
                     Map.entry("unanswerablePrecision",
-                            unanswerableCount == 0
-                                    ? -1.0
-                                    : unanswerablePrecisionSum / unanswerableCount),
+                            at10.unanswerableCases() == 0
+                                    ? -1.0 : at10.emptyRetrievalAccuracy()),
                     Map.entry("endToEndLatencyP50Ms", percentile(sorted, 0.50)),
                     Map.entry("endToEndLatencyP95Ms", percentile(sorted, 0.95)));
         }

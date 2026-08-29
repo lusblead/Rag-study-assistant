@@ -7,8 +7,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rag.backend.agent.retrieval.RetrievedChunk;
 import com.rag.backend.common.BizException;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
-import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.net.URI;
@@ -20,9 +18,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
-@Component
-@ConditionalOnExpression("'${rerank.provider:local}' == 'siliconflow'")
-// 调用 SiliconFlow rerank 接口对候选片段重排序。
+@Deprecated(forRemoval = false)
+// 兼容旧手工装配；Spring 生产主链路统一由 @Primary DynamicKnowledgeReranker 执行。
 public class SiliconFlowKnowledgeReranker implements KnowledgeReranker {
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
@@ -73,7 +70,8 @@ public class SiliconFlowKnowledgeReranker implements KnowledgeReranker {
                     .build();
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() >= 400) {
-                throw new BizException(500, "Rerank request failed, status=" + response.statusCode() + ", body=" + response.body());
+                throw new BizException(500, "Rerank request failed, status="
+                        + response.statusCode());
             }
             return parseResponse(response.body(), chunks, topK);
         } catch (Exception e) {
@@ -116,7 +114,7 @@ public class SiliconFlowKnowledgeReranker implements KnowledgeReranker {
                 continue;
             }
             double score = item.path("relevance_score").asDouble(chunks.get(index).score() == null ? 0.0 : chunks.get(index).score());
-            reranked.add(chunks.get(index).withScore(score));
+            reranked.add(chunks.get(index).withRerankScore(score));
         }
 
         return reranked.stream()

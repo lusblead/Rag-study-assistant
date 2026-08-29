@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 // 用固定时钟和 Mapper 返回行数验证 Claim 成功、竞争失败及过期后的提交拒绝。
@@ -51,6 +52,50 @@ class JobLeaseServiceTest {
         JobLeaseService.Lease lease = service.claim("job-1", "worker-a");
         assertThrows(JobLeaseService.LeaseLostException.class,
                 () -> service.succeed(lease));
+    }
+
+    @Test
+    void retryReturnsTheAuthoritativePersistedOutcome() {
+        IngestJobMapper mapper = mock(IngestJobMapper.class);
+        IngestJob retryable = job("job-retry", 7L, "RUNNING", 4L);
+        retryable.setLeaseOwner("worker-a");
+        retryable.setAttempt(4);
+        IngestJob exhausted = job("job-exhausted", 8L, "RUNNING", 9L);
+        exhausted.setLeaseOwner("worker-a");
+        exhausted.setAttempt(5);
+        when(mapper.selectById("job-retry")).thenReturn(retryable);
+        when(mapper.selectById("job-exhausted")).thenReturn(exhausted);
+        when(mapper.finishOwned(anyString(), anyString(), anyLong(),
+                anyString(), nullable(String.class), nullable(String.class),
+                any(), any())).thenReturn(1);
+        JobLeaseService service = new JobLeaseService(mapper,
+                Clock.fixed(Instant.parse("2026-07-16T00:00:00Z"),
+                        ZoneOffset.UTC),
+                Duration.ofSeconds(30));
+
+        JobLeaseService.RetryOutcome retry = service.retry(
+                new JobLeaseService.Lease(
+                        "job-retry", "worker-a",
+                        LocalDateTime.parse("2026-07-16T00:00:30"), 4L),
+                "TIMEOUT", "digest", Duration.ofSeconds(30));
+        JobLeaseService.RetryOutcome failed = service.retry(
+                new JobLeaseService.Lease(
+                        "job-exhausted", "worker-a",
+                        LocalDateTime.parse("2026-07-16T00:00:30"), 9L),
+                "TIMEOUT", "digest", Duration.ofSeconds(30));
+
+        assertEquals(JobLeaseService.RetryOutcome.RETRY_WAIT, retry);
+        assertEquals(JobLeaseService.RetryOutcome.RETRY_EXHAUSTED, failed);
+        verify(mapper).finishOwned(
+                eq("job-retry"), eq("worker-a"), eq(4L),
+                eq("RETRY_WAIT"), eq("TIMEOUT"), eq("digest"),
+                eq(LocalDateTime.parse("2026-07-16T00:00:30")),
+                eq(LocalDateTime.parse("2026-07-16T00:00:00")));
+        verify(mapper).finishOwned(
+                eq("job-exhausted"), eq("worker-a"), eq(9L),
+                eq("FAILED"), eq("RETRY_EXHAUSTED"), eq("digest"),
+                eq(LocalDateTime.parse("2026-07-16T00:00:00")),
+                eq(LocalDateTime.parse("2026-07-16T00:00:00")));
     }
 
     private static IngestJob job(String id, Long versionId, String state, long stateVersion) {
