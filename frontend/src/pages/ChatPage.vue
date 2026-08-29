@@ -58,6 +58,31 @@
             v-html="renderMarkdown(message.content || '正在生成...')"
           />
           <div v-else class="message-body">{{ message.content || "正在生成..." }}</div>
+          <details v-if="message.role === 'assistant' && message.metadata" class="decision-diagnostics">
+            <summary>
+              证据决策：{{ message.metadata.evidenceDecision.decision }}
+            </summary>
+            <div>
+              <span>原因 {{ message.metadata.evidenceDecision.reasonCode }}</span>
+              <span>
+                Rerank
+                {{ message.metadata.retrieval.rerank.requestedReranker }}
+                → {{ message.metadata.retrieval.rerank.actualReranker }}
+              </span>
+              <span v-if="message.metadata.retrieval.degraded">
+                已降级：{{ message.metadata.retrieval.rerank.fallbackReason }}
+              </span>
+              <span>
+                Grounding {{ message.metadata.grounding.status }}
+              </span>
+              <span v-if="message.metadata.grounding.generationAttempts > 1">
+                已执行一次修复
+              </span>
+              <span v-if="message.metadata.grounding.status === 'REJECTED'">
+                校验失败：{{ message.metadata.grounding.failureReason }}
+              </span>
+            </div>
+          </details>
           <ReferencesList v-if="message.references?.length" :references="message.references" />
         </article>
       </div>
@@ -85,7 +110,7 @@ import { api, streamChat } from "../api";
 import EmptyState from "../components/EmptyState.vue";
 import ReferencesList from "../components/ReferencesList.vue";
 import { renderMarkdown } from "../markdown";
-import type { ChatSession, Course, RetrievedChunk } from "../types";
+import type { ChatSession, Course, RagChatMetadata, RetrievedChunk } from "../types";
 
 type UiMessage = {
   id: string;
@@ -93,6 +118,7 @@ type UiMessage = {
   content: string;
   createdAt?: string;
   references?: RetrievedChunk[];
+  metadata?: RagChatMetadata;
 };
 
 const props = defineProps<{
@@ -201,6 +227,9 @@ async function submitQuestion() {
             latestReferences.value = references;
             patchAssistant(assistantId, { references });
           },
+          onMetadata: (metadata) => {
+            patchAssistant(assistantId, { metadata });
+          },
           onDelta: (delta) => {
             const target = messages.value.find((message) => message.id === assistantId);
             patchAssistant(assistantId, { content: `${target?.content || ""}${delta}` });
@@ -219,7 +248,8 @@ async function submitQuestion() {
       latestReferences.value = response.references || [];
       patchAssistant(assistantId, {
         content: response.answer,
-        references: response.references || []
+        references: response.references || [],
+        metadata: response.metadata
       });
     }
     await loadSessions();

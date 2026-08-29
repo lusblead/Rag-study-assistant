@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rag.backend.question.ChapterTagExtractor;
 import jakarta.annotation.PostConstruct;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.stereotype.Component;
 
 import java.sql.Connection;
@@ -11,6 +12,7 @@ import java.sql.ResultSet;
 import java.util.List;
 
 @Component
+@DependsOn(DatabaseMigrationConfiguration.MIGRATION_GATE_BEAN)
 public class QuestionSchemaMigration {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private final JdbcTemplate jdbcTemplate;

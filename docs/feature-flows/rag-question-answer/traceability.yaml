@@ -1,0 +1,1620 @@
+version: 1
+feature_id: "rag.question-answer"
+title: "RAG 课程问答"
+status: "implemented"
+
+characteristics:
+  cross_component: true
+  asynchronous: true
+  persisted_state: true
+  external_dependencies: true
+  retry_or_compensation: true
+  security_sensitive: true
+
+nodes:
+  E1:
+    kind: entry
+    description: 同步 RAG 问答入口
+    trigger: POST /api/agent/chat
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/controller/RagChatController.java
+        symbol: chat
+
+  E2:
+    kind: entry
+    description: SSE 流式 RAG 问答入口
+    trigger: POST /api/agent/chat/stream
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/controller/RagChatController.java
+        symbol: stream
+
+  D1:
+    kind: decision
+    description: 课程与问题字段通过入口校验
+    condition: courseId 不为 null 且 question 包含非空白字符
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/controller/RagChatController.java
+        symbol: validate
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/controller/RagChatControllerValidationTest.java
+        symbol: missingCourseIdIsRejectedBeforeServiceCall
+      - path: backend/src/test/java/com/rag/backend/agent/controller/RagChatControllerValidationTest.java
+        symbol: blankQuestionIsRejectedBeforeServiceCall
+
+  A1:
+    kind: action
+    description: 解析或创建会话并读取有限条最近消息
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: chat
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: stream
+      - path: backend/src/main/java/com/rag/backend/agent/history/ChatHistoryService.java
+        symbol: resolveSession
+      - path: backend/src/main/java/com/rag/backend/agent/history/ChatHistoryService.java
+        symbol: recentMessages
+
+  D2:
+    kind: decision
+    description: 检索 query 是否需要拼接历史用户问题
+    condition: recentMessages 中至少有一条 role=user 且内容非空
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: retrievalQuery
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceCharacterizationTest.java
+        symbol: currentHappyPathRetrievesBeforeCallingModelAndThenWritesHistory
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceCharacterizationTest.java
+        symbol: synchronousEmptyRetrievalRefusesLocallyWithoutCallingModel
+
+  A2:
+    kind: action
+    description: 没有历史用户消息时仅使用当前问题检索
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: retrievalQuery
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceCharacterizationTest.java
+        symbol: currentHappyPathRetrievesBeforeCallingModelAndThenWritesHistory
+
+  A3:
+    kind: action
+    description: 把历史用户消息按现有顺序与当前问题拼成检索 query
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: retrievalQuery
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceCharacterizationTest.java
+        symbol: synchronousEmptyRetrievalRefusesLocallyWithoutCallingModel
+
+  A4:
+    kind: action
+    description: 每次问答只解析一次不可变 ACTIVE-version RetrievalScope
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetriever.java
+        symbol: retrieveWithResult
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/RetrievalScope.java
+        symbol: RetrievalScope
+      - path: backend/src/main/java/com/rag/backend/ingestionlab/retrieval/ActiveVersionResolver.java
+        symbol: forCourse
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetrieverActiveVersionTest.java
+        symbol: emptyActiveVersionSetReturnsEmptyWithoutEmbeddingOrFallback
+
+  D8:
+    kind: decision
+    description: 本次不可变 scope 是否包含至少一个 ACTIVE version
+    condition: scope.activeVersionIds is not empty
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetriever.java
+        symbol: retrieveWithResult
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetrieverActiveVersionTest.java
+        symbol: emptyActiveVersionSetReturnsEmptyWithoutEmbeddingOrFallback
+
+  A12:
+    kind: action
+    description: 没有 ACTIVE version 时返回带 NO_ACTIVE_VERSION 诊断的合法空检索结果
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetriever.java
+        symbol: retrieveWithResult
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetrieverActiveVersionTest.java
+        symbol: emptyActiveVersionSetReturnsEmptyWithoutEmbeddingOrFallback
+
+  A13:
+    kind: action
+    description: DenseCandidateSource 在同一 scope 内执行向量召回、source threshold、MySQL 回表和版本复核
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/DenseCandidateSource.java
+        symbol: retrieve
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/CandidateSource.java
+        symbol: retrieve
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/CandidateBatch.java
+        symbol: CandidateBatch
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/DenseCandidateSourceTest.java
+        symbol: returnsRawScoresAndStableOrderWithinFrozenScope
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetrieverActiveVersionTest.java
+        symbol: mysqlRecheckDropsCandidateFromAStaleVersion
+    external_call:
+      system: Embedding provider and VersionedVectorSearch implementation
+      timeout: Embedding request 120s by default; Milvus SDK explicit timeout is not configured
+      failure_behavior: Propagate the retrieval failure; do not call the LLM or append this turn messages
+      failure_nodes: [X2, X3]
+
+  A14:
+    kind: action
+    description: 记录 requested/actual/attempt/fallback/semantic-empty 的 Rerank 执行结果并应用 FinalK
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetriever.java
+        symbol: retrieveWithResult
+      - path: backend/src/main/java/com/rag/backend/agent/rerank/KnowledgeReranker.java
+        symbol: rerankWithResult
+      - path: backend/src/main/java/com/rag/backend/agent/rerank/RerankExecutionResult.java
+        symbol: RerankExecutionResult
+      - path: backend/src/main/java/com/rag/backend/rerank/DynamicKnowledgeReranker.java
+        symbol: rerankWithResult
+    tests:
+      - path: backend/src/test/java/com/rag/backend/rerank/DynamicKnowledgeRerankerTest.java
+        symbol: remoteTechnicalFailureFallsBackToLocal
+
+  D9:
+    kind: decision
+    description: 是否通过配置显式关闭 Hybrid 并回退 Dense-only
+    condition: rag.hybrid.enabled 默认解析为 true；只有显式 false 才选择 Dense-only 回退
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetriever.java
+        symbol: retrieveWithResult
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/HybridDefaultConfigurationTest.java
+        symbol: defaultsHybridOnWithoutManualEnableAndRetainsExplicitRollback
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetrieverHybridTest.java
+        symbol: disabledGateKeepsDenseOnlyBehaviorAndNeverCallsLexical
+
+  A15:
+    kind: action
+    description: 双源 Collector 使用同一个不可变 scope 收集 Dense 与 Lexical batch 及安全诊断
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/DualCandidateSourceCollector.java
+        symbol: collect
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetriever.java
+        symbol: retrieveHybrid
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetrieverHybridTest.java
+        symbol: enabledGateUsesConfiguredWeightsOneScopeRerankAndFinalTopK
+
+  D10:
+    kind: decision
+    description: 至少一个 CandidateSource 是否成功返回 batch
+    condition: CandidateCollectionResult contains at least one successful batch
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/DualCandidateSourceCollector.java
+        symbol: collect
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/DualCandidateSourceCollectorTest.java
+        symbol: bothSourceFailuresFailClosed
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetrieverHybridTest.java
+        symbol: bothSourceFailuresPropagateCandidateCollectionException
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetrieverHybridTest.java
+        symbol: oneSourceFailureFailsOpenWithSuccessfulSourceRawOrderAndScores
+
+  D11:
+    kind: decision
+    description: Dense 与 Lexical 是否都成功返回非空且正权重候选
+    condition: both source batches are non-empty after applying zero-weight source semantics
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/fusion/RrfFusion.java
+        symbol: fuse
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/fusion/RrfFusionTest.java
+        symbol: oneEmptySourceFallsBackToTheNonEmptySource
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/fusion/RrfFusionTest.java
+        symbol: twoEmptySourcesReturnEmpty
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/fusion/RrfFusionTest.java
+        symbol: zeroWeightSourceDoesNotAddCandidatesOrForceRrf
+
+  A16:
+    kind: action
+    description: 每路内部稳定去重后按 w/(k+rank) 分别贡献并跨路求和
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/fusion/RrfFusion.java
+        symbol: fuse
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/fusion/RrfFusionTest.java
+        symbol: overlappingChunkSumsBothSourceContributionsExactly
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/fusion/RrfFusionTest.java
+        symbol: duplicateInsideOneSourceUsesOnlyItsFirstOneBasedRank
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/fusion/RrfFusionTest.java
+        symbol: equalScoresUseChunkIdAscendingAsTieBreaker
+
+  A17:
+    kind: action
+    description: 单路成功或单路非空时稳定去重并保留该路 raw score；双空返回空
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/fusion/RrfFusion.java
+        symbol: fuse
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/fusion/RrfFusionTest.java
+        symbol: singleSuccessfulSourceFallsBackWithRawScoreOrderAndStableDeduplication
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetrieverHybridTest.java
+        symbol: oneSourceFailureFailsOpenWithSuccessfulSourceRawOrderAndScores
+
+  A18:
+    kind: action
+    description: 按独立 Dense/Lexical SourceK 收集，并在融合或单源回退后冻结全局 CandidateK
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetriever.java
+        symbol: retrieveHybrid
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/DualCandidateSourceCollector.java
+        symbol: collect
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetrieverHybridTest.java
+        symbol: globalCandidateKCapsFusedUnionBeforeRerank
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/eval/ReviewedDev45RerankAblationTest.java
+        symbol: onlyTheExplicitReviewedDev45FileIsAccepted
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/DualCandidateSourceCollectorTest.java
+        symbol: passesIndependentLimitsToDenseAndLexicalSources
+
+  D12:
+    kind: decision
+    description: 把持久化 requested provider 映射为 none、local 或 remote 执行模式
+    condition: RerankSettings.provider
+    code:
+      - path: backend/src/main/java/com/rag/backend/rerank/DynamicKnowledgeReranker.java
+        symbol: requestedMode
+    tests:
+      - path: backend/src/test/java/com/rag/backend/rerank/DynamicKnowledgeRerankerTest.java
+        symbol: noneKeepsOriginalCandidateOrder
+
+  A19:
+    kind: action
+    description: requested none 时保持冻结候选精确原序且不应用 Rerank threshold
+    code:
+      - path: backend/src/main/java/com/rag/backend/rerank/DynamicKnowledgeReranker.java
+        symbol: rerankWithResult
+    tests:
+      - path: backend/src/test/java/com/rag/backend/rerank/DynamicKnowledgeRerankerTest.java
+        symbol: noneKeepsOriginalCandidateOrder
+
+  A20:
+    kind: action
+    description: 对完整冻结候选执行一次 LocalLexicalKnowledgeReranker
+    code:
+      - path: backend/src/main/java/com/rag/backend/rerank/DynamicKnowledgeReranker.java
+        symbol: rerankWithResult
+      - path: backend/src/main/java/com/rag/backend/agent/rerank/LocalLexicalKnowledgeReranker.java
+        symbol: rerank
+    tests:
+      - path: backend/src/test/java/com/rag/backend/rerank/DynamicKnowledgeRerankerTest.java
+        symbol: remoteTechnicalFailureFallsBackToLocal
+
+  A21:
+    kind: action
+    description: 对完整冻结候选发送一次有界 Remote Rerank 请求
+    code:
+      - path: backend/src/main/java/com/rag/backend/rerank/RerankSettingsService.java
+        symbol: rerankRemote
+      - path: backend/src/main/java/com/rag/backend/rerank/DynamicKnowledgeReranker.java
+        symbol: rerankWithResult
+    tests:
+      - path: backend/src/test/java/com/rag/backend/rerank/RerankSettingsServiceTimeoutTest.java
+        symbol: localServerTimeoutIsClassifiedOnceWithoutExternalApi
+    external_call:
+      system: OpenAI-compatible SiliconFlow rerank endpoint
+      timeout: rerank.timeout-seconds; one request and no automatic retry
+      failure_behavior: Typed technical failure enters fail-open local fallback or fail-closed X2 without logging request or response bodies
+      failure_nodes: [D13, D16, C1]
+
+  D13:
+    kind: decision
+    description: Remote Rerank 是否返回完整、唯一、有限分数的冻结候选排列
+    condition: remote call completes and response passes validation
+    code:
+      - path: backend/src/main/java/com/rag/backend/rerank/RerankSettingsService.java
+        symbol: parseRemoteResponse
+    tests:
+      - path: backend/src/test/java/com/rag/backend/rerank/RerankSettingsServiceTest.java
+        symbol: nonEmptyInputRejectsInvalidRemoteResults
+
+  D14:
+    kind: decision
+    description: Local Rerank 是否返回完整且没有候选集外 Chunk 的排列
+    condition: local reranker returns a complete candidate permutation
+    code:
+      - path: backend/src/main/java/com/rag/backend/rerank/DynamicKnowledgeReranker.java
+        symbol: validateCompletePermutation
+    tests:
+      - path: backend/src/test/java/com/rag/backend/rerank/DynamicKnowledgeRerankerTest.java
+        symbol: requestedLocalTechnicalFailureFallsBackToOriginal
+
+  D16:
+    kind: decision
+    description: Remote 技术失败后是否允许 fail-open
+    condition: RerankSettings.failOpen is true
+    code:
+      - path: backend/src/main/java/com/rag/backend/rerank/DynamicKnowledgeReranker.java
+        symbol: rerankWithResult
+    tests:
+      - path: backend/src/test/java/com/rag/backend/rerank/DynamicKnowledgeRerankerTest.java
+        symbol: failClosedCarriesSanitizedExecutionResult
+
+  D17:
+    kind: decision
+    description: Local 技术失败后是否允许 fail-open 到原序
+    condition: RerankSettings.failOpen is true
+    code:
+      - path: backend/src/main/java/com/rag/backend/rerank/DynamicKnowledgeReranker.java
+        symbol: rerankWithResult
+    tests:
+      - path: backend/src/test/java/com/rag/backend/rerank/DynamicKnowledgeRerankerTest.java
+        symbol: requestedLocalFailureIsPropagatedWithExecutionWhenFailClosed
+
+  A22:
+    kind: action
+    description: Remote 成功后把 actual reranker 记录为 remote
+    code:
+      - path: backend/src/main/java/com/rag/backend/rerank/DynamicKnowledgeReranker.java
+        symbol: rerankWithResult
+
+  A23:
+    kind: action
+    description: Local 成功后把 actual reranker 记录为 local
+    code:
+      - path: backend/src/main/java/com/rag/backend/rerank/DynamicKnowledgeReranker.java
+        symbol: rerankWithResult
+
+  C1:
+    kind: compensation
+    description: Remote 技术失败后使用同一冻结候选降级到 Local
+    restores_or_resolves: Remote 不可用时仍可在不重新召回的前提下产生可排序候选
+    failure_behavior: Local 再失败时仅允许进入 C2 或按 fail-closed 传播
+    code:
+      - path: backend/src/main/java/com/rag/backend/rerank/DynamicKnowledgeReranker.java
+        symbol: rerankWithResult
+    tests:
+      - path: backend/src/test/java/com/rag/backend/rerank/DynamicKnowledgeRerankerTest.java
+        symbol: remoteTechnicalFailureFallsBackToLocal
+
+  C2:
+    kind: compensation
+    description: Local 技术失败后恢复 Rerank 输入的精确原始顺序
+    restores_or_resolves: 两级 Reranker 均不可用时不丢失已经召回的候选
+    failure_behavior: 不重新检索、不再调用 Remote 或 Local，直接进入 FinalK
+    code:
+      - path: backend/src/main/java/com/rag/backend/rerank/DynamicKnowledgeReranker.java
+        symbol: rerankWithResult
+    tests:
+      - path: backend/src/test/java/com/rag/backend/rerank/DynamicKnowledgeRerankerTest.java
+        symbol: remoteAndLocalTechnicalFailuresFallBackToOriginal
+
+  D15:
+    kind: decision
+    description: 按 actual remote/local 选择独立 threshold；original/none bypass
+    condition: actual mode threshold enabled and rerankScore >= configured minimum
+    code:
+      - path: backend/src/main/java/com/rag/backend/rerank/DynamicKnowledgeReranker.java
+        symbol: postProcess
+    tests:
+      - path: backend/src/test/java/com/rag/backend/rerank/DynamicKnowledgeRerankerTest.java
+        symbol: actualModeThresholdCanProduceSemanticEmptyWithoutFallback
+
+  A38:
+    kind: action
+    description: 根据多样性开关决定 Rerank 只输出 FinalK 或输出阈值过滤后的完整 CandidateK 池
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetriever.java
+        symbol: applyRerank
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetrieverMmrTest.java
+        symbol: disabledMmrPreservesCurrentFinalKAndRerankLimit
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetrieverMmrTest.java
+        symbol: enabledMmrReceivesOnlyTheFrozenCandidateKPool
+
+  D25:
+    kind: decision
+    description: 是否启用默认关闭的 MMR 实验候选
+    condition: rag.diversity.mmr.enabled=true
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/diversity/MmrDiversitySelector.java
+        symbol: enabled
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/diversity/MmrDiversitySelectorTest.java
+        symbol: disabledSelectorPreservesInputOrderAndLimitsFinalK
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/diversity/MmrDiversitySelectorTest.java
+        symbol: enabledSelectorUsesJaccardToAvoidNearDuplicateFinalK
+
+  A39:
+    kind: action
+    description: 使用上游稳定 rank 相关性与 Jaccard 冗余从冻结候选池确定性选择 FinalK
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/diversity/MmrDiversitySelector.java
+        symbol: select
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/diversity/JaccardTextSimilarity.java
+        symbol: similarity
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/diversity/MmrDiversitySelectorTest.java
+        symbol: enabledSelectorUsesJaccardToAvoidNearDuplicateFinalK
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/diversity/MmrDiversitySelectorTest.java
+        symbol: tiesRemainDeterministicByUpstreamRankAndChunkId
+
+  A24:
+    kind: action
+    description: 以 RetrievalExecutionResult 返回 FinalK chunks、source 诊断、Rerank requested/actual/fallback 与语义空原因
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/KnowledgeRetriever.java
+        symbol: retrieveWithResult
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetriever.java
+        symbol: retrieveWithResult
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/RetrievalExecutionResult.java
+        symbol: RetrievalExecutionResult
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/RetrievalDiagnostics.java
+        symbol: RetrievalDiagnostics
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetrieverActiveVersionTest.java
+        symbol: emptyActiveVersionSetReturnsEmptyWithoutEmbeddingOrFallback
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetrieverHybridTest.java
+        symbol: successfulEmptySourcesExposeSemanticEmptyWithoutTechnicalFailure
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceEvidenceDecisionTest.java
+        symbol: responseExposesRequestedActualAndFallbackWithoutDuplicatingChunks
+
+  A25:
+    kind: action
+    description: 构造 EvidenceDecisionInput 并按合法空、歧义、可追踪性、来源匹配阈值、冲突和直接覆盖执行三分类 Policy
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: prepare
+      - path: backend/src/main/java/com/rag/backend/agent/evidence/EvidenceDecisionInput.java
+        symbol: EvidenceDecisionInput
+      - path: backend/src/main/java/com/rag/backend/agent/evidence/EvidenceDecisionPolicy.java
+        symbol: decide
+      - path: backend/src/main/java/com/rag/backend/agent/evidence/RuleBasedEvidenceDecisionPolicy.java
+        symbol: decide
+      - path: backend/src/main/java/com/rag/backend/agent/evidence/EvidenceDecisionProperties.java
+        symbol: EvidenceDecisionProperties
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/evidence/RuleBasedEvidenceDecisionPolicyTest.java
+        symbol: emptySuccessfulRetrievalRefuses
+      - path: backend/src/test/java/com/rag/backend/agent/evidence/RuleBasedEvidenceDecisionPolicyTest.java
+        symbol: nonEmptyDistractorRefusesEvenWhenFinalScoreIsOne
+      - path: backend/src/test/java/com/rag/backend/agent/evidence/RuleBasedEvidenceDecisionPolicyTest.java
+        symbol: vagueQuestionWithoutResolvableHistoryClarifies
+      - path: backend/src/test/java/com/rag/backend/agent/evidence/RuleBasedEvidenceDecisionPolicyTest.java
+        symbol: conflictAcrossSourcesClarifiesButSameSourceRefuses
+      - path: backend/src/test/java/com/rag/backend/agent/evidence/RuleBasedEvidenceDecisionPolicyTest.java
+        symbol: directSingleEvidenceAnswersAndKeepsTraceableId
+
+  A30:
+    kind: action
+    description: 按 usableEvidenceIds 选择 references，构造 RagChatMetadata 并写入不含 query 或 Chunk 正文的决策日志
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: usableChunks
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: logDecision
+      - path: backend/src/main/java/com/rag/backend/agent/model/RagChatMetadata.java
+        symbol: RagChatMetadata
+      - path: backend/src/main/java/com/rag/backend/agent/evidence/EvidenceObservedSignals.java
+        symbol: EvidenceObservedSignals
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceEvidenceDecisionTest.java
+        symbol: responseExposesRequestedActualAndFallbackWithoutDuplicatingChunks
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceEvidenceDecisionTest.java
+        symbol: clarifySkipsPromptAndModelButPersistsTheCompletedLocalTurn
+
+  D18:
+    kind: decision
+    description: 生成前 Evidence Decision 是 ANSWER、CLARIFY 还是 REFUSE
+    condition: EvidenceDecisionResult.decision
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/evidence/AnswerabilityDecision.java
+        symbol: AnswerabilityDecision
+      - path: backend/src/main/java/com/rag/backend/agent/evidence/EvidenceDecisionResult.java
+        symbol: EvidenceDecisionResult
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: chat
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: stream
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceCharacterizationTest.java
+        symbol: currentHappyPathRetrievesBeforeCallingModelAndThenWritesHistory
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceEvidenceDecisionTest.java
+        symbol: clarifySkipsPromptAndModelButPersistsTheCompletedLocalTurn
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceCharacterizationTest.java
+        symbol: synchronousEmptyRetrievalRefusesLocallyWithoutCallingModel
+
+  A6:
+    kind: action
+    description: ANSWER 仅使用 Policy 标记 usable 的 FinalK 证据渲染历史、资料来源与问题
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: usableChunks
+      - path: backend/src/main/java/com/rag/backend/agent/prompt/RagPromptTemplate.java
+        symbol: render
+      - path: backend/src/main/java/com/rag/backend/agent/model/RagPromptContext.java
+        symbol: referencesText
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/evidence/RuleBasedEvidenceDecisionPolicyTest.java
+        symbol: directSingleEvidenceAnswersAndKeepsTraceableId
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceCharacterizationTest.java
+        symbol: currentHappyPathRetrievesBeforeCallingModelAndThenWritesHistory
+
+  A26:
+    kind: action
+    description: CLARIFY 使用固定本地 renderer 生成最小澄清文本并清空 references
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/evidence/EvidenceDecisionRenderer.java
+        symbol: render
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: usableChunks
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceEvidenceDecisionTest.java
+        symbol: clarifySkipsPromptAndModelButPersistsTheCompletedLocalTurn
+
+  A27:
+    kind: action
+    description: REFUSE 使用固定本地 renderer 生成证据不足或冲突说明并清空 references
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/evidence/EvidenceDecisionRenderer.java
+        symbol: render
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: usableChunks
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceCharacterizationTest.java
+        symbol: synchronousEmptyRetrievalRefusesLocallyWithoutCallingModel
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceCharacterizationTest.java
+        symbol: streamingEmptyRetrievalRefusesLocallyAndWritesHistoryAfterCompletion
+
+  D19:
+    kind: decision
+    description: CLARIFY 或 REFUSE 按同步 JSON 或 SSE 本地 Flux 返回
+    condition: HTTP route 是 /api/agent/chat 或 /api/agent/chat/stream
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: chat
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: stream
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceEvidenceDecisionTest.java
+        symbol: clarifySkipsPromptAndModelButPersistsTheCompletedLocalTurn
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceCharacterizationTest.java
+        symbol: streamingEmptyRetrievalRefusesLocallyAndWritesHistoryAfterCompletion
+
+  A28:
+    kind: action
+    description: SSE 本地决策返回单元素 Flux 并先发送 session、空 references 与 metadata
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: stream
+      - path: backend/src/main/java/com/rag/backend/agent/controller/RagChatController.java
+        symbol: stream
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceCharacterizationTest.java
+        symbol: streamingEmptyRetrievalRefusesLocallyAndWritesHistoryAfterCompletion
+
+  A29:
+    kind: action
+    description: SSE 把固定本地响应作为一个 delta 发送并正常 complete
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: stream
+      - path: backend/src/main/java/com/rag/backend/agent/controller/RagChatController.java
+        symbol: stream
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceCharacterizationTest.java
+        symbol: streamingEmptyRetrievalRefusesLocallyAndWritesHistoryAfterCompletion
+
+  D4:
+    kind: decision
+    description: 入口选择同步 JSON 或 SSE 流式响应
+    condition: HTTP route 是 /api/agent/chat 或 /api/agent/chat/stream
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/controller/RagChatController.java
+        symbol: chat
+      - path: backend/src/main/java/com/rag/backend/agent/controller/RagChatController.java
+        symbol: stream
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceCharacterizationTest.java
+        symbol: currentHappyPathRetrievesBeforeCallingModelAndThenWritesHistory
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceCharacterizationTest.java
+        symbol: currentStreamingModelFailureDoesNotAppendSuccessfulConversationMessages
+
+  A7:
+    kind: action
+    description: 同步发送一次 OpenAI-compatible chat completion 请求
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/llm/OpenAiCompatibleChatClient.java
+        symbol: call
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/llm/OpenAiCompatibleChatClientTimeoutCharacterizationTest.java
+        symbol: currentSynchronousRequestTimeoutIsWrappedOnceWithoutLeakingSensitiveData
+      - path: backend/src/test/java/com/rag/backend/agent/llm/OpenAiCompatibleChatClientTimeoutCharacterizationTest.java
+        symbol: currentSynchronousReadTimeoutIsWrappedOnceWithoutLeakingSensitiveData
+      - path: backend/src/test/java/com/rag/backend/agent/llm/OpenAiCompatibleChatClientTimeoutCharacterizationTest.java
+        symbol: currentSynchronousConnectTimeoutIsWrappedOnceWithoutLeakingSensitiveData
+    external_call:
+      system: OpenAI-compatible chat completion endpoint
+      timeout: llm.timeout-seconds, default 120s, applied to connect and request
+      failure_behavior: IOException becomes BizException 500; there is no automatic retry
+      failure_nodes: [D5, X2]
+
+  D5:
+    kind: decision
+    description: 同步模型请求是否返回可解析的成功答案
+    condition: OpenAiCompatibleChatClient.call returns normally
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/llm/OpenAiCompatibleChatClient.java
+        symbol: call
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: chat
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceCharacterizationTest.java
+        symbol: currentHappyPathRetrievesBeforeCallingModelAndThenWritesHistory
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceCharacterizationTest.java
+        symbol: currentSynchronousModelFailureDoesNotAppendSuccessfulConversationMessages
+
+  A8:
+    kind: action
+    description: ANSWER 返回模型 lazy Flux，并在订阅前发送 session、references 与 metadata SSE 事件
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: stream
+      - path: backend/src/main/java/com/rag/backend/agent/controller/RagChatController.java
+        symbol: stream
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceCharacterizationTest.java
+        symbol: currentStreamingModelFailureDoesNotAppendSuccessfulConversationMessages
+
+  A9:
+    kind: action
+    description: 订阅后发送一次 OpenAI-compatible 流式请求
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/llm/OpenAiCompatibleChatClient.java
+        symbol: stream
+      - path: backend/src/main/java/com/rag/backend/agent/controller/RagChatController.java
+        symbol: stream
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/llm/OpenAiCompatibleChatClientTimeoutCharacterizationTest.java
+        symbol: currentStreamingRequestTimeoutRemainsOriginalErrorAndIsSentOnce
+      - path: backend/src/test/java/com/rag/backend/agent/llm/OpenAiCompatibleChatClientTimeoutCharacterizationTest.java
+        symbol: currentStreamingReadTimeoutRemainsOriginalErrorAndIsSentOnce
+    external_call:
+      system: OpenAI-compatible streaming chat completion endpoint
+      timeout: llm.timeout-seconds, default 120s, applied to connect and request
+      failure_behavior: Exception becomes Flux error; Controller attempts the stable sanitized error event when deliverable, records send_failed if delivery fails, and never retries automatically
+      failure_nodes: [D6, X3]
+
+  A10:
+    kind: action
+    description: 累积模型内容并把每个片段转发为 delta SSE 事件
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: stream
+      - path: backend/src/main/java/com/rag/backend/agent/controller/RagChatController.java
+        symbol: stream
+  D6:
+    kind: decision
+    description: 模型 Flux 正常 complete 还是以 error 终止
+    condition: ChatClient.stream emits onComplete rather than onError
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: stream
+      - path: backend/src/main/java/com/rag/backend/agent/controller/RagChatController.java
+        symbol: stream
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceCharacterizationTest.java
+        symbol: currentStreamingModelFailureDoesNotAppendSuccessfulConversationMessages
+
+  T1:
+    kind: transition
+    description: 模型答案或本地决策响应完整成功后追加本轮用户消息
+    entity: Chat turn messages
+    from: NO_NEW_TURN_MESSAGES
+    to: USER_MESSAGE_PERSISTED
+    trigger: response_completed_successfully
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: appendCompletedTurn
+      - path: backend/src/main/java/com/rag/backend/agent/history/MyBatisChatHistoryService.java
+        symbol: appendMessage
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceCharacterizationTest.java
+        symbol: currentHappyPathRetrievesBeforeCallingModelAndThenWritesHistory
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceCharacterizationTest.java
+        symbol: streamingEmptyRetrievalRefusesLocallyAndWritesHistoryAfterCompletion
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceEvidenceDecisionTest.java
+        symbol: clarifySkipsPromptAndModelButPersistsTheCompletedLocalTurn
+
+  T2:
+    kind: transition
+    description: 用户消息后追加完整助手答案
+    entity: Chat turn messages
+    from: USER_MESSAGE_PERSISTED
+    to: SUCCESS_PAIR_PERSISTED
+    trigger: append_user_succeeded
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: appendCompletedTurn
+      - path: backend/src/main/java/com/rag/backend/agent/history/MyBatisChatHistoryService.java
+        symbol: appendMessage
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceCharacterizationTest.java
+        symbol: currentHappyPathRetrievesBeforeCallingModelAndThenWritesHistory
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceCharacterizationTest.java
+        symbol: streamingEmptyRetrievalRefusesLocallyAndWritesHistoryAfterCompletion
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceEvidenceDecisionTest.java
+        symbol: clarifySkipsPromptAndModelButPersistsTheCompletedLocalTurn
+
+  D7:
+    kind: decision
+    description: 成功消息持久化后选择同步响应或 SSE done
+    condition: 当前入口的 delivery mode
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/controller/RagChatController.java
+        symbol: chat
+      - path: backend/src/main/java/com/rag/backend/agent/controller/RagChatController.java
+        symbol: stream
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceCharacterizationTest.java
+        symbol: currentHappyPathRetrievesBeforeCallingModelAndThenWritesHistory
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceCharacterizationTest.java
+        symbol: streamingEmptyRetrievalRefusesLocallyAndWritesHistoryAfterCompletion
+
+  A11:
+    kind: action
+    description: SSE 正常完成回调发送 done 事件
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/controller/RagChatController.java
+        symbol: stream
+
+  G1:
+    kind: safeguard
+    description: 请求字段校验先于业务调用
+    safeguard_type: validation
+    guarantee: 缺少 courseId 或空 question 不会执行检索、模型调用或聊天消息写入
+    protects: [D1]
+    failure_behavior: 抛出 BizException 400
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/controller/RagChatController.java
+        symbol: validate
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/controller/RagChatControllerValidationTest.java
+        symbol: missingCourseIdIsRejectedBeforeServiceCall
+      - path: backend/src/test/java/com/rag/backend/agent/controller/RagChatControllerValidationTest.java
+        symbol: blankQuestionIsRejectedBeforeServiceCall
+
+  G2:
+    kind: safeguard
+    description: 单次解析不可变 scope 且 Dense 与 Lexical 共享同一 ACTIVE 版本集合
+    safeguard_type: validation
+    guarantee: 同一请求的 source 使用相同 ACTIVE-version 快照；非 ACTIVE、过期或串版 Chunk 不会进入 Fusion、Rerank、Prompt 或 references
+    protects: [A4, A13, A15]
+    failure_behavior: 没有 ACTIVE 版本直接返回空；版本不匹配候选被丢弃
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetriever.java
+        symbol: retrieveWithResult
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/DenseCandidateSource.java
+        symbol: retrieve
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/MySqlLexicalCandidateSource.java
+        symbol: retrieve
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetrieverActiveVersionTest.java
+        symbol: emptyActiveVersionSetReturnsEmptyWithoutEmbeddingOrFallback
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetrieverActiveVersionTest.java
+        symbol: mysqlRecheckDropsCandidateFromAStaleVersion
+
+  G5:
+    kind: safeguard
+    description: Hybrid 默认自动开启并保留显式 Dense-only 回退，单路降级不比较跨源 raw score
+    safeguard_type: rollout
+    guarantee: 默认配置无需人工开启即可走 Hybrid；显式 false 保持 Dense-only；Hybrid 仅双路非空才 RRF，单路失败或为空时保留成功路原始顺序与分数
+    protects: [D9, A16, A17]
+    failure_behavior: 一路异常安全记录诊断并 fail-open；两路异常 fail-closed；合法空 batch 不标记 degraded
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetriever.java
+        symbol: retrieveWithResult
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/MySqlLexicalCandidateSource.java
+        symbol: retrieve
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/DualCandidateSourceCollector.java
+        symbol: collect
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/fusion/RrfFusion.java
+        symbol: fuse
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/HybridDefaultConfigurationTest.java
+        symbol: defaultsHybridOnWithoutManualEnableAndRetainsExplicitRollback
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetrieverDenseEquivalenceTest.java
+        symbol: candidateSourceRefactorPreservesDenseRetrievalOutput
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/CurrentRetrieverBoundaryTest.java
+        symbol: lexicalRerankerCannotRecoverChunkMissedByDenseRetrieval
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/MySqlLexicalCandidateSourceTest.java
+        symbol: activationSwitchUsesOnlyTheNewFrozenVersionScope
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/DualCandidateSourceCollectorTest.java
+        symbol: oneSourceFailureFailsOpenWithoutFusion
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetrieverHybridTest.java
+        symbol: disabledGateKeepsDenseOnlyBehaviorAndNeverCallsLexical
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetrieverHybridTest.java
+        symbol: oneSourceFailureFailsOpenWithSuccessfulSourceRawOrderAndScores
+
+  G6:
+    kind: safeguard
+    description: SourceK、CandidateK 与 FinalK 在不同阶段应用且满足正数边界
+    safeguard_type: validation
+    guarantee: RRF 后至多 CandidateK 个候选进入 Rerank，且 CandidateK >= FinalK > 0
+    protects: [A18, A14]
+    failure_behavior: 非法配置或请求立即抛出 IllegalArgumentException，不执行召回或 Rerank
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetriever.java
+        symbol: validateLimits
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetrieverHybridTest.java
+        symbol: globalCandidateKCapsFusedUnionBeforeRerank
+
+  G7:
+    kind: safeguard
+    description: Dense、Lexical、Fusion、Rerank 与 Final 分数分离保留
+    safeguard_type: integrity
+    guarantee: 缺失分数保持 null，后阶段分数不会覆盖前阶段证据
+    protects: [A13, A16, A17, A20, A21, A14]
+    failure_behavior: 非有限分数被拒绝；不允许用 0 代替缺失值
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/ChunkScores.java
+        symbol: ChunkScores
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/RetrievedChunk.java
+        symbol: RetrievedChunk
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/ChunkScoresTest.java
+        symbol: stageUpdatesPreserveScoresFromOtherStages
+
+  G8:
+    kind: safeguard
+    description: Rerank fallback 最多经过 remote、local、original 且不重新召回
+    safeguard_type: retry
+    guarantee: 每个 provider 至多调用一次，original 精确等于冻结 Rerank 输入顺序
+    protects: [C1, C2, D16, D17]
+    failure_behavior: fail-closed 传播带执行记录的错误；fail-open 终止于 original
+    code:
+      - path: backend/src/main/java/com/rag/backend/rerank/DynamicKnowledgeReranker.java
+        symbol: rerankWithResult
+    tests:
+      - path: backend/src/test/java/com/rag/backend/rerank/DynamicKnowledgeRerankerTest.java
+        symbol: remoteAndLocalTechnicalFailuresFallBackToOriginal
+
+  G9:
+    kind: safeguard
+    description: requested、actual、attempt 与降级原因真实可观察且不包含敏感输入
+    safeguard_type: observability
+    guarantee: 执行结果和结构化日志只包含低基数模式、原因、计数与耗时
+    protects: [A14, A20, A21, C1, C2]
+    failure_behavior: 聊天 metadata 只暴露脱敏聚合诊断而不暴露完整 attempts；日志不记录 query、Chunk 正文、API Key 或完整响应
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/rerank/RerankExecutionResult.java
+        symbol: RerankExecutionResult
+      - path: backend/src/main/java/com/rag/backend/rerank/DynamicKnowledgeReranker.java
+        symbol: logExecution
+    tests:
+      - path: backend/src/test/java/com/rag/backend/rerank/DynamicKnowledgeRerankerTest.java
+        symbol: remoteTechnicalFailureFallsBackToLocal
+
+  G10:
+    kind: safeguard
+    description: actual-mode threshold 与技术失败、语义空明确分离
+    safeguard_type: validation
+    guarantee: 只有成功 rerank 的原始分数参与对应阈值；全低于阈值不重试、不降阈值
+    protects: [D13, D14, D15]
+    failure_behavior: 语义空作为 A24/A25 的正常 Policy 输入；技术失败进入有界 fallback 或 X2
+    code:
+      - path: backend/src/main/java/com/rag/backend/rerank/DynamicKnowledgeReranker.java
+        symbol: postProcess
+    tests:
+      - path: backend/src/test/java/com/rag/backend/rerank/DynamicKnowledgeRerankerTest.java
+        symbol: remoteSuccessSemanticEmptyDoesNotFallBackToLocal
+
+  G19:
+    kind: safeguard
+    description: MMR 默认关闭、候选不扩张且诊断不泄露敏感正文
+    safeguard_type: rollout
+    guarantee: 关闭开关保持当前 FinalK；开启时输出只来自 Rerank 后 CandidateK 子集，并使用确定性 tie-break
+    protects: [D25, A38, A39]
+    failure_behavior: 非法 lambda 或不支持的 similarity strategy 在启动时失败；关闭开关即可恢复当前顺序
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/diversity/MmrDiversitySelector.java
+        symbol: MmrDiversitySelector
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/RetrievalDiagnostics.java
+        symbol: Diversity
+    tests:
+      - path: backend/src/test/java/com/rag/backend/ingestionlab/ReliableIngestionContextTest.java
+        symbol: reliableIngestionProductionGraphCanBeCreated
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/diversity/MmrDiversitySelectorTest.java
+        symbol: rejectsInvalidConfiguration
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetrieverMmrTest.java
+        symbol: enabledMmrReceivesOnlyTheFrozenCandidateKPool
+
+  G11:
+    kind: safeguard
+    description: 检索与 Rerank 技术失败不会伪装为语义 REFUSE
+    safeguard_type: integrity
+    guarantee: retrieveWithResult 抛出的技术异常在 Policy 之前传播，不执行 decide、Prompt、ChatClient 或本轮消息追加
+    protects: [A24, A25]
+    failure_behavior: 同步返回错误；SSE prepare 分支尝试发送稳定脱敏 error，投递失败则记录 send_failed；首次创建的空会话不回滚
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: prepare
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/KnowledgeRetriever.java
+        symbol: retrieveWithResult
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceEvidenceDecisionTest.java
+        symbol: retrievalTechnicalFailureIsNotConvertedIntoSemanticRefusal
+
+  G12:
+    kind: safeguard
+    description: 非 ANSWER 决策禁止进入 Prompt 与模型
+    safeguard_type: validation
+    guarantee: 只有携带至少一个且全部唯一可映射 usableEvidenceIds 的 ANSWER 调用 RagPromptTemplate 和 ChatClient；未知、空或重复 chunkId fail-closed；CLARIFY/REFUSE 使用本地 renderer 且 references 为空
+    protects: [D18, A7, A9]
+    failure_behavior: 本地返回可执行的澄清或拒答文本，不发起外部模型请求
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: chat
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: stream
+      - path: backend/src/main/java/com/rag/backend/agent/evidence/EvidenceDecisionRenderer.java
+        symbol: render
+      - path: backend/src/main/java/com/rag/backend/agent/evidence/EvidenceDecisionResult.java
+        symbol: EvidenceDecisionResult
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceEvidenceDecisionTest.java
+        symbol: clarifySkipsPromptAndModelButPersistsTheCompletedLocalTurn
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceCharacterizationTest.java
+        symbol: synchronousEmptyRetrievalRefusesLocallyWithoutCallingModel
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceCharacterizationTest.java
+        symbol: streamingEmptyRetrievalRefusesLocallyAndWritesHistoryAfterCompletion
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceEvidenceDecisionTest.java
+        symbol: answerWithUnknownEvidenceIdFailsClosedBeforeSynchronousModelCall
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceEvidenceDecisionTest.java
+        symbol: answerWithUnknownEvidenceIdFailsClosedBeforeStreamingModelCall
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceEvidenceDecisionTest.java
+        symbol: duplicateRetrievedChunkIdsFailClosedBeforeModelCall
+
+  G13:
+    kind: safeguard
+    description: Evidence threshold 与实际 score provenance 严格匹配
+    safeguard_type: validation
+    guarantee: actual remote/local 只使用对应 rerankScore；否则依次选择实际存在的 fusion、dense、lexical 或 legacy final 分数；未启用阈值时数值不参与决策，启用时必须提供 calibrationId
+    protects: [A25]
+    failure_behavior: 对应来源没有可用分数时不能借用其他来源阈值或把缺失值当 0
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/evidence/RuleBasedEvidenceDecisionPolicy.java
+        symbol: scoreKind
+      - path: backend/src/main/java/com/rag/backend/agent/evidence/EvidenceDecisionProperties.java
+        symbol: threshold
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/evidence/RuleBasedEvidenceDecisionPolicyTest.java
+        symbol: calibratedThresholdUsesOnlyMatchingScoreProvenance
+      - path: backend/src/test/java/com/rag/backend/agent/evidence/EvidenceDecisionConfigurationTest.java
+        symbol: enabledThresholdWithoutCalibrationProvenanceFailsClosed
+
+  G14:
+    kind: safeguard
+    description: 决策和检索路径可观察且不复制敏感正文
+    safeguard_type: observability
+    guarantee: 同步/SSE 共用 metadata，包含 decision、reason、policyVersion、observedSignals 与脱敏 retrieval/rerank 摘要；日志只写低基数状态和计数
+    protects: [A30, A8, A28]
+    failure_behavior: metadata 与日志不包含 query、Chunk 正文、Prompt、凭据、完整远程响应或完整 attempt 列表
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: logDecision
+      - path: backend/src/main/java/com/rag/backend/agent/model/RagChatMetadata.java
+        symbol: RagChatMetadata
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/RetrievalDiagnostics.java
+        symbol: RetrievalDiagnostics
+      - path: backend/src/main/java/com/rag/backend/agent/controller/RagChatController.java
+        symbol: stream
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceEvidenceDecisionTest.java
+        symbol: responseExposesRequestedActualAndFallbackWithoutDuplicatingChunks
+
+  G15:
+    kind: safeguard
+    description: 同步与 SSE 共享决策和成功历史语义
+    safeguard_type: atomicity
+    guarantee: 两种入口共用 prepare；模型或本地响应完整成功后保存实际 user/assistant 文本，SSE 仅在 Flux 正常 complete 后保存并发送 done
+    protects: [D19, T1, T2]
+    failure_behavior: Flux error 不写成功消息对；两次 append 仍非跨调用原子事务
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: prepare
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: appendCompletedTurn
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceEvidenceDecisionTest.java
+        symbol: clarifySkipsPromptAndModelButPersistsTheCompletedLocalTurn
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceCharacterizationTest.java
+        symbol: streamingEmptyRetrievalRefusesLocallyAndWritesHistoryAfterCompletion
+
+  G3:
+    kind: safeguard
+    description: 模型超时路径有界且不泄露测试敏感值
+    safeguard_type: timeout
+    guarantee: 单次同步或流式调用不会自动重试，超时错误与捕获日志不包含 API Key、完整 Prompt 或完整模型响应
+    protects: [A7, A9]
+    failure_behavior: 同步抛 BizException 500；流式发出 Flux error
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/llm/OpenAiCompatibleChatClient.java
+        symbol: baseRequest
+      - path: backend/src/main/java/com/rag/backend/agent/llm/OpenAiCompatibleChatClient.java
+        symbol: call
+      - path: backend/src/main/java/com/rag/backend/agent/llm/OpenAiCompatibleChatClient.java
+        symbol: stream
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/llm/OpenAiCompatibleChatClientTimeoutCharacterizationTest.java
+        symbol: currentSynchronousRequestTimeoutIsWrappedOnceWithoutLeakingSensitiveData
+      - path: backend/src/test/java/com/rag/backend/agent/llm/OpenAiCompatibleChatClientTimeoutCharacterizationTest.java
+        symbol: currentSynchronousReadTimeoutIsWrappedOnceWithoutLeakingSensitiveData
+      - path: backend/src/test/java/com/rag/backend/agent/llm/OpenAiCompatibleChatClientTimeoutCharacterizationTest.java
+        symbol: currentSynchronousConnectTimeoutIsWrappedOnceWithoutLeakingSensitiveData
+      - path: backend/src/test/java/com/rag/backend/agent/llm/OpenAiCompatibleChatClientTimeoutCharacterizationTest.java
+        symbol: currentStreamingRequestTimeoutRemainsOriginalErrorAndIsSentOnce
+      - path: backend/src/test/java/com/rag/backend/agent/llm/OpenAiCompatibleChatClientTimeoutCharacterizationTest.java
+        symbol: currentStreamingReadTimeoutRemainsOriginalErrorAndIsSentOnce
+
+  G4:
+    kind: safeguard
+    description: 准备、Policy 或模型失败不写入本轮成功消息
+    safeguard_type: atomicity
+    guarantee: retrieveWithResult、Policy、ChatClient.call 抛错或 ChatClient.stream onError 时，本轮 user 与 assistant 都不 append
+    protects: [T1, T2]
+    failure_behavior: 错误向同步处理器或 SSE Flux error 传播；Controller 仅在适用且可投递时尝试通用 error，已有会话本身不回滚
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: chat
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: stream
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceCharacterizationTest.java
+        symbol: currentSynchronousModelFailureDoesNotAppendSuccessfulConversationMessages
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceCharacterizationTest.java
+        symbol: currentStreamingModelFailureDoesNotAppendSuccessfulConversationMessages
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceEvidenceDecisionTest.java
+        symbol: retrievalTechnicalFailureIsNotConvertedIntoSemanticRefusal
+
+  X1:
+    kind: outcome
+    description: 请求字段校验失败
+    result: HTTP 400；不调用 RagChatService
+
+  X2:
+    kind: outcome
+    description: 准备阶段或同步模型调用失败
+    result: 同步返回既有错误；SSE prepare 失败时尝试投递稳定脱敏 error，失败为 send_failed；业务拒绝或技术失败均不转为 REFUSE，且不追加本轮成功消息对
+
+  X3:
+    kind: outcome
+    description: SSE 模型流失败或 error 事件投递失败
+    result: 模型流失败时尝试发送稳定脱敏 error；投递成功终态为 error，投递失败终态为 send_failed；两者均无 done 且不追加本轮成功消息对
+
+  X4:
+    kind: outcome
+    description: 同步问答成功
+    result: JSON 返回 sessionId、answer、references 与 metadata，之后数据库已有本轮两条消息
+
+  X5:
+    kind: outcome
+    description: SSE 问答成功
+    result: session、references、metadata、delta 后发送 done，数据库已有本轮两条消息
+
+  E3:
+    kind: entry
+    description: 生成前 Evidence Decision 已输出 ANSWER
+    trigger: EvidenceDecisionResult.decision == ANSWER
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: chat
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: stream
+
+  A31:
+    kind: action
+    description: 从 usable evidence 构造唯一请求级 CitationCatalog
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/grounding/CitationCatalog.java
+        symbol: from
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/prompt/RagPromptTemplateCitationTest.java
+        symbol: promptUsesRequestLocalSourceIdsWithoutInternalIds
+
+  D20:
+    kind: decision
+    description: 是否启用严格生成后 Grounding
+    condition: rag.grounding.enabled
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/grounding/GroundedAnswerGenerator.java
+        symbol: generate
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/grounding/GroundingConfigurationTest.java
+        symbol: strictGroundingDefaultsOffUntilHumanCalibrationExists
+      - path: backend/src/test/java/com/rag/backend/agent/grounding/GroundedAnswerGeneratorTest.java
+        symbol: disabledModePreservesSingleGenerationAndMarksTheGap
+
+  A32:
+    kind: action
+    description: 兼容模式只生成一次并显式标记 Grounding DISABLED
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/grounding/GroundedAnswerGenerator.java
+        symbol: generate
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/grounding/GroundedAnswerGeneratorTest.java
+        symbol: disabledModePreservesSingleGenerationAndMarksTheGap
+
+  A33:
+    kind: action
+    description: 完整生成首次候选并执行 Citation Integrity
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/grounding/GroundedAnswerGenerator.java
+        symbol: generate
+      - path: backend/src/main/java/com/rag/backend/agent/grounding/CitationIntegrityValidator.java
+        symbol: validate
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/grounding/GroundedAnswerGeneratorTest.java
+        symbol: acceptedAnswerUsesOneGeneration
+      - path: backend/src/test/java/com/rag/backend/agent/grounding/CitationIntegrityValidatorTest.java
+        symbol: missingCitationFailsCoverage
+
+  D21:
+    kind: decision
+    description: 引用语法、白名单归属和原子事实主张覆盖全部有效
+    condition: CitationIntegrityResult.valid
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/grounding/CitationIntegrityValidator.java
+        symbol: validate
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/grounding/CitationIntegrityValidatorTest.java
+        symbol: missingCitationFailsCoverage
+      - path: backend/src/test/java/com/rag/backend/agent/grounding/CitationIntegrityValidatorTest.java
+        symbol: fabricatedSourceIdFailsWhitelistEvenWhenClaimHasCitation
+      - path: backend/src/test/java/com/rag/backend/agent/grounding/CitationIntegrityValidatorTest.java
+        symbol: legalCitationDoesNotAttemptToProveSemanticSupport
+      - path: backend/src/test/java/com/rag/backend/agent/grounding/CitationIntegrityValidatorTest.java
+        symbol: everyAtomicClaimRequiresItsOwnNearbyCitation
+
+  A34:
+    kind: action
+    description: 对每个原子事实主张执行确定性优先的 Claim-Evidence Support
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/grounding/ClaimSupportEvaluator.java
+        symbol: evaluate
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/grounding/ClaimSupportEvaluatorTest.java
+        symbol: exactEvidenceSupportsTheClaim
+      - path: backend/src/test/java/com/rag/backend/agent/grounding/ClaimSupportEvaluatorTest.java
+        symbol: realCitationCannotSupportANewPreciseValue
+      - path: backend/src/test/java/com/rag/backend/agent/grounding/ClaimSupportEvaluatorTest.java
+        symbol: explicitOppositePolarityIsContradicted
+      - path: backend/src/test/java/com/rag/backend/agent/grounding/ClaimSupportEvaluatorTest.java
+        symbol: complexParaphraseIsUncertainWithoutHumanCalibration
+      - path: backend/src/test/java/com/rag/backend/agent/grounding/ClaimSupportEvaluatorTest.java
+        symbol: separateEvidenceFragmentsCannotBecomeDirectSupportByConcatenation
+
+  D22:
+    kind: decision
+    description: 首次候选是否所有原子事实主张均为 SUPPORTED
+    condition: ClaimSupportResult.allSupported
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/grounding/GroundingValidator.java
+        symbol: validate
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/grounding/GroundedAnswerGeneratorTest.java
+        symbol: acceptedAnswerUsesOneGeneration
+      - path: backend/src/test/java/com/rag/backend/agent/grounding/GroundedAnswerGeneratorTest.java
+        symbol: unsupportedFirstAnswerIsRepairedOnceAndFullyRevalidated
+
+  C3:
+    kind: compensation
+    description: 使用同一 CitationCatalog 与结构化失败原因生成一次完整替代回答
+    restores_or_resolves: 未通过生成后校验的首次候选不会返回给用户
+    failure_behavior: 修复模型技术失败向既有技术错误出口传播；修复内容失败则进入安全说明
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/grounding/GroundedAnswerGenerator.java
+        symbol: generate
+      - path: backend/src/main/java/com/rag/backend/agent/grounding/GroundingRepairPromptTemplate.java
+        symbol: render
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/grounding/GroundedAnswerGeneratorTest.java
+        symbol: unsupportedFirstAnswerIsRepairedOnceAndFullyRevalidated
+      - path: backend/src/test/java/com/rag/backend/agent/grounding/GroundedAnswerGeneratorTest.java
+        symbol: secondFailureDiscardsBothCandidatesAndReturnsSafeText
+
+  A35:
+    kind: action
+    description: 对修复后的完整回答重新执行 Citation Integrity 与 Claim Support
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/grounding/GroundingValidator.java
+        symbol: validate
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/grounding/GroundedAnswerGeneratorTest.java
+        symbol: unsupportedFirstAnswerIsRepairedOnceAndFullyRevalidated
+      - path: backend/src/test/java/com/rag/backend/agent/grounding/GroundedAnswerGeneratorTest.java
+        symbol: secondFailureDiscardsBothCandidatesAndReturnsSafeText
+
+  D23:
+    kind: decision
+    description: 修复回答是否通过两层完整校验
+    condition: GroundingValidationResult.accepted
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/grounding/GroundedAnswerGenerator.java
+        symbol: generate
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/grounding/GroundedAnswerGeneratorTest.java
+        symbol: unsupportedFirstAnswerIsRepairedOnceAndFullyRevalidated
+      - path: backend/src/test/java/com/rag/backend/agent/grounding/GroundedAnswerGeneratorTest.java
+        symbol: secondFailureDiscardsBothCandidatesAndReturnsSafeText
+
+  A36:
+    kind: action
+    description: 选择首次、修复或安全说明作为最终答案，并生成低基数 Grounding metadata
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/grounding/GroundedAnswerGenerator.java
+        symbol: generate
+      - path: backend/src/main/java/com/rag/backend/agent/model/RagChatMetadata.java
+        symbol: withGrounding
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceGroundingTest.java
+        symbol: synchronousAnswerRepairsOnceAndReturnsFinalGroundingMetadata
+
+  D24:
+    kind: decision
+    description: 严格 Grounding 结果通过同步响应还是 SSE 交付
+    condition: 当前入口为 chat 或 stream
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: chat
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: stream
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceGroundingTest.java
+        symbol: synchronousAnswerRepairsOnceAndReturnsFinalGroundingMetadata
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceGroundingTest.java
+        symbol: strictSseBuffersBothCandidatesAndEmitsOnlyTheVerifiedAnswer
+
+  A37:
+    kind: action
+    description: 严格 SSE 在完整校验后发送最终 metadata 与一个已验证 delta
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: stream
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceGroundingTest.java
+        symbol: strictSseBuffersBothCandidatesAndEmitsOnlyTheVerifiedAnswer
+
+  G16:
+    kind: safeguard
+    description: Prompt、Citation Integrity、Claim Support 与修复共享唯一 CitationCatalog
+    safeguard_type: integrity
+    guarantee: 模型只能引用本次 usable evidence 对应的请求级 S 编号，修复不能扩张或重编号证据
+    protects: [A31, C3]
+    failure_behavior: 重复 Chunk、空目录或未知 source ID fail-closed
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/grounding/CitationCatalog.java
+        symbol: CitationCatalog
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/prompt/RagPromptTemplateCitationTest.java
+        symbol: promptUsesRequestLocalSourceIdsWithoutInternalIds
+      - path: backend/src/test/java/com/rag/backend/agent/grounding/CitationIntegrityValidatorTest.java
+        symbol: fabricatedSourceIdFailsWhitelistEvenWhenClaimHasCitation
+
+  G17:
+    kind: safeguard
+    description: 生成后修复严格限制为一次并全量复检
+    safeguard_type: retry
+    guarantee: 每轮最多两次模型生成，第二次不能绕过 Citation Integrity 或 Claim Support
+    protects: [C3, A35]
+    failure_behavior: 第二次校验仍失败时丢弃模型候选并返回安全说明
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/grounding/GroundedAnswerGenerator.java
+        symbol: generate
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/grounding/GroundedAnswerGeneratorTest.java
+        symbol: unsupportedFirstAnswerIsRepairedOnceAndFullyRevalidated
+      - path: backend/src/test/java/com/rag/backend/agent/grounding/GroundedAnswerGeneratorTest.java
+        symbol: secondFailureDiscardsBothCandidatesAndReturnsSafeText
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceGroundingTest.java
+        symbol: strictSseBuffersBothCandidatesAndEmitsOnlyTheVerifiedAnswer
+
+  G18:
+    kind: safeguard
+    description: 未校准语义 Judge 不得把复杂语义判为 SUPPORTED
+    safeguard_type: validation
+    guarantee: 确定性失败不能被 Judge 覆盖；Judge 缺少人工 calibration 时剩余语义只能是 UNCERTAIN
+    protects: [A34]
+    failure_behavior: UNCERTAIN 不放行并进入一次修复或最终安全说明
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/grounding/ClaimSupportEvaluator.java
+        symbol: evaluate
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/grounding/ClaimSupportEvaluatorTest.java
+        symbol: complexParaphraseIsUncertainWithoutHumanCalibration
+      - path: backend/src/test/java/com/rag/backend/agent/grounding/ClaimSupportEvaluatorTest.java
+        symbol: calibratedJudgeCannotOverrideDeterministicFailure
+
+  E4:
+    kind: entry
+    description: 同步或 SSE 聊天请求进入统一 Trace HTTP 入口
+    trigger: POST /api/agent/chat 或 POST /api/agent/chat/stream
+    code:
+      - path: backend/src/main/java/com/rag/backend/observability/trace/TraceHttpFilter.java
+        symbol: TraceHttpFilter
+      - path: backend/src/main/java/com/rag/backend/agent/controller/RagChatController.java
+        symbol: RagChatController
+    tests:
+      - path: backend/src/test/java/com/rag/backend/observability/TraceContextServiceTest.java
+        symbol: TraceContextServiceTest
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatTracePropagationTest.java
+        symbol: RagChatTracePropagationTest
+
+  A40:
+    kind: action
+    description: 创建独立本地聊天 root，在 HTTP scope 设置 MDC traceId，并忽略不可信外部 correlation header
+    code:
+      - path: backend/src/main/java/com/rag/backend/observability/trace/TraceHttpFilter.java
+        symbol: TraceHttpFilter
+      - path: backend/src/main/java/com/rag/backend/observability/trace/TraceContextService.java
+        symbol: TraceContextService
+    tests:
+      - path: backend/src/test/java/com/rag/backend/observability/TraceContextServiceTest.java
+        symbol: TraceContextServiceTest
+
+  D29:
+    kind: decision
+    description: 是否存在合法的入站 W3C v00 traceparent
+    condition: TraceContextService 能解析非零 traceId、非零 spanId 与合法 flags 的 v00 traceparent
+    code:
+      - path: backend/src/main/java/com/rag/backend/observability/trace/TraceContextService.java
+        symbol: isValidTraceparent
+      - path: backend/src/main/java/com/rag/backend/observability/trace/TraceHttpFilter.java
+        symbol: doFilterInternal
+    tests:
+      - path: backend/src/test/java/com/rag/backend/observability/TraceContextServiceTest.java
+        symbol: chatHttpAlwaysStartsIndependentRootAndOnlyLinksIncomingTrace
+
+  A45:
+    kind: action
+    description: 只记录合法 upstream Trace link；聊天本地 root 与 parent 不变
+    code:
+      - path: backend/src/main/java/com/rag/backend/observability/trace/TraceContextService.java
+        symbol: link
+      - path: backend/src/main/java/com/rag/backend/observability/trace/TraceHttpFilter.java
+        symbol: doFilterInternal
+    tests:
+      - path: backend/src/test/java/com/rag/backend/observability/TraceContextServiceTest.java
+        symbol: chatHttpAlwaysStartsIndependentRootAndOnlyLinksIncomingTrace
+
+  D26:
+    kind: decision
+    description: 当前聊天入口是同步响应还是延迟订阅的 SSE Publisher
+    condition: RagChatController 调用 chat 或 stream
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/controller/RagChatController.java
+        symbol: chat
+      - path: backend/src/main/java/com/rag/backend/agent/controller/RagChatController.java
+        symbol: stream
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatTracePropagationTest.java
+        symbol: RagChatTracePropagationTest
+
+  D30:
+    kind: decision
+    description: SSE 的 HTTP-thread prepare 是否返回 RagChatStreamResponse 与 Publisher
+    condition: RagChatService.stream 在 session/history、Retrieval、Policy 与可选严格 Grounding 阶段正常返回，或因会话业务校验 BizException、技术异常而未返回
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/controller/RagChatController.java
+        symbol: stream
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: stream
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatTracePropagationTest.java
+        symbol: ssePrepareErrorHasOneSanitizedTerminalOnTheRequestTrace
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatTracePropagationTest.java
+        symbol: ssePrepareBusinessRejectionUsesGenericPayloadAndTracesBizException
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatTracePropagationTest.java
+        symbol: sseSignalsContinueTraceAcrossAsyncThreadAndLeaveNoMdc
+
+  A41:
+    kind: action
+    description: 同步请求 scope 内追踪 Retrieval、Policy、LLM 与 Grounding 真实阶段
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: chat
+      - path: backend/src/main/java/com/rag/backend/observability/trace/TraceSpan.java
+        symbol: TraceSpan
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatTracePropagationTest.java
+        symbol: RagChatTracePropagationTest
+
+  D27:
+    kind: decision
+    description: 同步聊天以成功、本地决策、业务拒绝还是技术错误结束
+    condition: RagChatService.chat 正常返回，或抛出 BizException、技术异常
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: chat
+      - path: backend/src/main/java/com/rag/backend/observability/trace/TraceSpan.java
+        symbol: TraceSpan
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatTracePropagationTest.java
+        symbol: RagChatTracePropagationTest
+
+  A42:
+    kind: action
+    description: prepare 成功时，HTTP 线程完成 session/history、Retrieval、Policy 与可选严格 Grounding，捕获不可变 carrier 并返回 Publisher
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: stream
+      - path: backend/src/main/java/com/rag/backend/observability/trace/TraceCarrier.java
+        symbol: TraceCarrier
+      - path: backend/src/main/java/com/rag/backend/observability/trace/TraceContextService.java
+        symbol: TraceContextService
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatTracePropagationTest.java
+        symbol: RagChatTracePropagationTest
+
+  D31:
+    kind: decision
+    description: session、references 与 metadata 三个初始 SSE 事件是否全部投递成功
+    condition: RagChatController.send 对三个初始事件依次返回 true；任一 false 都在调度订阅前终止
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/controller/RagChatController.java
+        symbol: stream
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatTracePropagationTest.java
+        symbol: initialEventSendFailureStopsBeforeReturnedPublisherSubscription
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatTracePropagationTest.java
+        symbol: sseSignalsContinueTraceAcrossAsyncThreadAndLeaveNoMdc
+
+  A43:
+    kind: action
+    description: 异步订阅执行剩余 LLM I/O、成功历史写入和 SSE callbacks，并在实际线程恢复短生命周期 scope
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/controller/RagChatController.java
+        symbol: stream
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: stream
+      - path: backend/src/main/java/com/rag/backend/observability/trace/TraceContextService.java
+        symbol: TraceContextService
+      - path: backend/src/main/java/com/rag/backend/agent/llm/OpenAiCompatibleChatClient.java
+        symbol: stream
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatTracePropagationTest.java
+        symbol: RagChatTracePropagationTest
+
+  D28:
+    kind: decision
+    description: 已订阅的 SSE 以 completed、upstream error、cancelled、timeout 或 send_failed 终止
+    condition: Reactor terminal signal、SseEmitter lifecycle callback 与 delta/done/error send 返回值；prepare 失败由 D30、初始事件失败由 D31 在返回流订阅前单独终止；严格 Grounding 的 Provider I/O 可能已在 prepare 内完成
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/controller/RagChatController.java
+        symbol: stream
+      - path: backend/src/main/java/com/rag/backend/observability/trace/TraceSpan.java
+        symbol: TraceSpan
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatTracePropagationTest.java
+        symbol: RagChatTracePropagationTest
+      - path: backend/src/test/java/com/rag/backend/agent/llm/OpenAiCompatibleChatClientTimeoutCharacterizationTest.java
+        symbol: cancellingBeforeHeadersCancelsExchangeOnceAndEndsTraceAsCancelled
+
+  C4:
+    kind: compensation
+    description: prepare 业务拒绝或技术错误、取消、超时或投递失败以脱敏唯一终态结束，并按实际阶段释放上游与 MDC scope
+    restores_or_resolves: 线程池和后续请求不继承旧 traceId；仅在返回流存在活跃订阅时 dispose，并由仍活跃的远端 Provider 取消 Future 或关闭 Stream；初始事件失败时返回流未订阅，严格 Grounding Provider 已在 prepare 内终止；done/error 失败时上游已终止
+    failure_behavior: 同步异常保留既有错误传播；SSE 仅在适用且可投递时尝试稳定 CHAT_STREAM_FAILED，任一投递失败记 send_failed；Trace 清理不覆盖原业务状态
+    code:
+      - path: backend/src/main/java/com/rag/backend/observability/trace/TraceContextService.java
+        symbol: TraceContextService
+      - path: backend/src/main/java/com/rag/backend/agent/controller/RagChatController.java
+        symbol: stream
+      - path: backend/src/main/java/com/rag/backend/agent/llm/OpenAiCompatibleChatClient.java
+        symbol: abortStream
+    tests:
+      - path: backend/src/test/java/com/rag/backend/observability/TraceContextServiceTest.java
+        symbol: httpFilterErrorStillEmitsErrorTerminalAndCleansMdc
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatTracePropagationTest.java
+        symbol: ssePrepareErrorHasOneSanitizedTerminalOnTheRequestTrace
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatTracePropagationTest.java
+        symbol: ssePrepareBusinessRejectionUsesGenericPayloadAndTracesBizException
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatTracePropagationTest.java
+        symbol: initialEventSendFailureStopsBeforeReturnedPublisherSubscription
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatTracePropagationTest.java
+        symbol: deltaSendFailureCompletesEmitterAndCancelsUpstreamExactlyOnce
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatTracePropagationTest.java
+        symbol: sseErrorEventSendFailureIsTerminalSendFailedExactlyOnce
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatTracePropagationTest.java
+        symbol: doneSendFailureIsTerminalSendFailedExactlyOnce
+
+  G20:
+    kind: safeguard
+    description: 摄取与聊天保持独立 root，跨业务只关联不伪造父子
+    safeguard_type: integrity
+    guarantee: 每个聊天请求创建真实本地 root；合法 upstream traceparent 只形成 link，通用 HTTP 入口忽略外部 correlation header
+    protects: [A40, A45]
+    failure_behavior: 非法或缺失 traceparent 不形成 link；未来 correlationId 只能由可信业务层显式注入
+    code:
+      - path: backend/src/main/java/com/rag/backend/observability/trace/TraceContextService.java
+        symbol: TraceContextService
+      - path: backend/src/main/java/com/rag/backend/observability/trace/TraceCarrier.java
+        symbol: TraceCarrier
+    tests:
+      - path: backend/src/test/java/com/rag/backend/observability/TraceContextServiceTest.java
+        symbol: genericHttpFilterNeverTrustsExternalCorrelationHeader
+
+  G21:
+    kind: safeguard
+    description: Reactor 与线程复用边界成对恢复并清理 MDC
+    safeguard_type: concurrency
+    guarantee: MDC key 固定为 traceId；prepare error、complete、error、cancel、timeout、send_failed 和同步异常后都不泄漏到下一任务
+    protects: [A42, A43, C4]
+    failure_behavior: 每个异步 callback 使用短 scope，并在 finally 或 doFinally 等价边界关闭
+    code:
+      - path: backend/src/main/java/com/rag/backend/observability/trace/TraceContextService.java
+        symbol: TraceContextService
+      - path: backend/src/main/java/com/rag/backend/observability/trace/TraceHttpFilter.java
+        symbol: TraceHttpFilter
+    tests:
+      - path: backend/src/test/java/com/rag/backend/observability/TraceContextServiceTest.java
+        symbol: TraceContextServiceTest
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatTracePropagationTest.java
+        symbol: RagChatTracePropagationTest
+
+  G22:
+    kind: safeguard
+    description: 聊天 Trace 仅记录脱敏运维字段且不制造高基数指标
+    safeguard_type: privacy
+    guarantee: question、历史、Prompt、Chunk、引用正文、模型 token、凭据、远端响应、carrier 原值和 baggage 不进入日志或 span；可投递的 SSE error 事件只使用稳定错误码与通用消息；ID 不作 Meter tag
+    protects: [A41, A43, C4]
+    failure_behavior: 仅导出 allowlist 的 stage、result、decision 和稳定 error.code，未知字段被丢弃
+    code:
+      - path: backend/src/main/java/com/rag/backend/observability/trace/TraceSpan.java
+        symbol: TraceSpan
+      - path: backend/src/main/java/com/rag/backend/observability/trace/TraceContextService.java
+        symbol: TraceContextService
+      - path: backend/src/main/java/com/rag/backend/agent/controller/RagChatController.java
+        symbol: STREAM_ERROR_PAYLOAD
+      - path: backend/src/main/java/com/rag/backend/agent/llm/OpenAiCompatibleChatClient.java
+        symbol: ensureSuccess
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatTracePropagationTest.java
+        symbol: ssePrepareErrorHasOneSanitizedTerminalOnTheRequestTrace
+      - path: backend/src/test/java/com/rag/backend/agent/llm/OpenAiCompatibleChatClientTimeoutCharacterizationTest.java
+        symbol: synchronousProviderErrorOmitsResponseBodyFromExceptionAndLogs
+
+  G23:
+    kind: safeguard
+    description: Trace 终态忠实区分成功、本地语义决策、业务拒绝、技术错误、取消与投递失败
+    safeguard_type: observability
+    guarantee: CLARIFY/REFUSE 不创建 LLM span；prepare BizException 或技术错误不标 REFUSE 或 success；completed、error、cancelled、timeout 与 send_failed 不互相冒充
+    protects: [D27, D28, D30, D31]
+    failure_behavior: 追踪失败不得改变产品响应、消息持久化或现有错误传播
+    code:
+      - path: backend/src/main/java/com/rag/backend/observability/trace/TraceSpan.java
+        symbol: TraceSpan
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: RagChatService
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatTracePropagationTest.java
+        symbol: refuseHasPolicyAndHistoryButNoLlmOrGroundingSpan
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatTracePropagationTest.java
+        symbol: ssePrepareBusinessRejectionUsesGenericPayloadAndTracesBizException
+      - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatTracePropagationTest.java
+        symbol: initialEventSendFailureStopsBeforeReturnedPublisherSubscription
+
+  X6:
+    kind: outcome
+    description: 同步聊天以成功或本地语义决策完成
+    result: 返回既有 JSON 语义，Trace 真实结束且 MDC 已清理
+
+  X7:
+    kind: outcome
+    description: SSE 正常 complete
+    result: 成功历史写入后发送 done，terminal 标记 completed，所有 callback scope 与 MDC 已清理
+
+  X8:
+    kind: outcome
+    description: 同步业务拒绝或技术错误，以及 SSE error/cancel/timeout/send_failed
+    result: 同步保留既有错误语义；SSE 若可投递 error 则只用稳定错误码，投递失败不保证额外 error 事件。仅在存在活跃订阅时取消上游，Trace 与 MDC 已清理

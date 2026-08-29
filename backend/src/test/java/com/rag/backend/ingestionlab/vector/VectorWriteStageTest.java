@@ -77,6 +77,12 @@ class VectorWriteStageTest {
             }
         }
         @Override
+        public void awaitVersionVisible(long documentVersionId,
+                                        int expectedCount,
+                                        java.time.Duration timeout) {
+            // HashMap 写入在当前测试线程立即可见。
+        }
+        @Override
         public java.util.Optional<VectorMetadata> find(long id) {
             VectorRecord record = rows.get(id);
             if (record == null) return java.util.Optional.empty();

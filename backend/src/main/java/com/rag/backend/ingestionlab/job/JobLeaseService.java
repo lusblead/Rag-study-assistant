@@ -144,7 +144,7 @@ public class JobLeaseService {
      * attempt 在成功领取时已经加一，所以 current.attempt >= maxAttempts
      * 表示本次已是最后一次允许的执行。
      */
-    public void retry(
+    public RetryOutcome retry(
             Lease lease,
             String errorCode,
             String safeDetail,
@@ -158,7 +158,7 @@ public class JobLeaseService {
 
         if (current.getAttempt() >= current.getMaxAttempts()) {
             fail(lease, "RETRY_EXHAUSTED", safeDetail);
-            return;
+            return RetryOutcome.RETRY_EXHAUSTED;
         }
         finish(
                 lease,
@@ -166,5 +166,12 @@ public class JobLeaseService {
                 errorCode,
                 safeDetail,
                 now().plus(backoff));
+        return RetryOutcome.RETRY_WAIT;
+    }
+
+    /** retry 的权威持久结果；调用方不得用第二次预读推测终态。 */
+    public enum RetryOutcome {
+        RETRY_WAIT,
+        RETRY_EXHAUSTED
     }
 }

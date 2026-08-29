@@ -1,6 +1,7 @@
 package com.rag.backend.config;
 
 import jakarta.annotation.PostConstruct;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -8,6 +9,7 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 
 @Component
+@DependsOn(DatabaseMigrationConfiguration.MIGRATION_GATE_BEAN)
 public class PracticeRecordSchemaMigration {
     private final JdbcTemplate jdbcTemplate;
 

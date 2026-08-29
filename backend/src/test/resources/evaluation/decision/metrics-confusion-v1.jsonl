@@ -1,0 +1,11 @@
+{"fixtureStatus":"FIXTURE_ONLY","id":"a-a-1","truth":"ANSWER","prediction":"ANSWER","severity":"HIGH"}
+{"fixtureStatus":"FIXTURE_ONLY","id":"a-a-2","truth":"ANSWER","prediction":"ANSWER","severity":"MEDIUM"}
+{"fixtureStatus":"FIXTURE_ONLY","id":"a-c-1","truth":"ANSWER","prediction":"CLARIFY","severity":"MEDIUM"}
+{"fixtureStatus":"FIXTURE_ONLY","id":"a-r-1","truth":"ANSWER","prediction":"REFUSE","severity":"HIGH"}
+{"fixtureStatus":"FIXTURE_ONLY","id":"c-a-1","truth":"CLARIFY","prediction":"ANSWER","severity":"CRITICAL"}
+{"fixtureStatus":"FIXTURE_ONLY","id":"c-c-1","truth":"CLARIFY","prediction":"CLARIFY","severity":"MEDIUM"}
+{"fixtureStatus":"FIXTURE_ONLY","id":"c-c-2","truth":"CLARIFY","prediction":"CLARIFY","severity":"HIGH"}
+{"fixtureStatus":"FIXTURE_ONLY","id":"r-a-1","truth":"REFUSE","prediction":"ANSWER","severity":"CRITICAL"}
+{"fixtureStatus":"FIXTURE_ONLY","id":"r-c-1","truth":"REFUSE","prediction":"CLARIFY","severity":"HIGH"}
+{"fixtureStatus":"FIXTURE_ONLY","id":"r-r-1","truth":"REFUSE","prediction":"REFUSE","severity":"HIGH"}
+{"fixtureStatus":"FIXTURE_ONLY","id":"r-r-2","truth":"REFUSE","prediction":"REFUSE","severity":"CRITICAL"}

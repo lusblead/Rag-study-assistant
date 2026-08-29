@@ -2,6 +2,12 @@ package com.rag.backend.agent.retrieval.eval;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rag.backend.agent.evaluation.Answerability;
+import com.rag.backend.agent.evaluation.CaseRetrievalMetrics;
+import com.rag.backend.agent.evaluation.RetrievalEvalReport;
+import com.rag.backend.agent.evaluation.RetrievalGroundTruth;
+import com.rag.backend.agent.evaluation.RetrievalMetricsAccumulator;
+import com.rag.backend.agent.evaluation.RetrievalMetricsCalculator;
 import com.rag.backend.agent.embedding.MockEmbeddingClient;
 import com.rag.backend.agent.model.KnowledgeChunk;
 import com.rag.backend.agent.repository.KnowledgeChunkRepository;
@@ -28,6 +34,7 @@ import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * 使用当前版本门禁、Mock Embedding、本地向量端口和本地 Rerank 跑一套可复现 smoke。
@@ -42,6 +49,25 @@ class RagRetrievalSmokeEvalTest {
 
     @Test
     void runVersionSafeOfflineSmokeAndWriteReport() throws Exception {
+        Path explicitProbe = Path.of("explicit", "report.json");
+        assertEquals(explicitProbe,
+                resolveReportOutput(explicitProbe.toString(), null),
+                "显式输出必须优先于模块默认目录");
+        Path moduleBuildDirectoryProbe =
+                Path.of("module-build-probe").toAbsolutePath().normalize();
+        assertEquals(
+                moduleBuildDirectoryProbe.resolve("rag-eval")
+                        .resolve("latest.json").normalize(),
+                resolveReportOutput(
+                        null, moduleBuildDirectoryProbe.toString()),
+                "未显式指定输出时必须使用模块构建目录");
+        assertThrows(IllegalStateException.class,
+                () -> resolveReportOutput(null, null),
+                "缺少显式输出和模块构建目录时必须 fail closed");
+
+        Path output = resolveReportOutput(
+                System.getProperty("rag.eval.output"),
+                System.getProperty("rag.eval.buildDirectory"));
         Path datasetRoot = Path.of(System.getProperty(
                 "rag.eval.datasetDir",
                 defaultDatasetRoot().toString()));
@@ -83,14 +109,8 @@ class RagRetrievalSmokeEvalTest {
         Map<Long, CorpusRow> corpusById = corpus.stream().collect(
                 Collectors.toMap(CorpusRow::chunkId, value -> value));
         List<Map<String, Object>> caseReports = new ArrayList<>();
-        double recallAt1 = 0.0;
-        double recallAt3 = 0.0;
-        double recallAt5 = 0.0;
-        double reciprocalRank = 0.0;
-        double ndcgAt5 = 0.0;
-        int answerable = 0;
-        int noAnswer = 0;
-        int noAnswerReturned = 0;
+        RetrievalMetricsCalculator metricsCore = new RetrievalMetricsCalculator();
+        RetrievalMetricsAccumulator canonical = new RetrievalMetricsAccumulator();
         int staleLeakCount = 0;
 
         for (EvalCase evalCase : cases) {
@@ -108,31 +128,22 @@ class RagRetrievalSmokeEvalTest {
                     .count();
             staleLeakCount += caseStaleLeaks;
 
+            RetrievalGroundTruth groundTruth = groundTruth(evalCase);
+            Map<Integer, CaseRetrievalMetrics> canonicalMetrics = Map.of(
+                    1, metricsCore.evaluateCase(groundTruth, ids, 1),
+                    3, metricsCore.evaluateCase(groundTruth, ids, 3),
+                    5, metricsCore.evaluateCase(groundTruth, ids, 5));
+            canonical.add(groundTruth, canonicalMetrics);
+            CaseRetrievalMetrics at5 = canonicalMetrics.get(5);
             Map<String, Object> metrics = new LinkedHashMap<>();
             if (evalCase.answerable()) {
-                answerable++;
-                double r1 = recallAt(ids, evalCase.relevantChunkIds(), 1);
-                double r3 = recallAt(ids, evalCase.relevantChunkIds(), 3);
-                double r5 = recallAt(ids, evalCase.relevantChunkIds(), 5);
-                double rr = reciprocalRank(ids, evalCase.relevantChunkIds());
-                double ndcg = ndcgAt(ids, evalCase.relevantChunkIds(), 5);
-                recallAt1 += r1;
-                recallAt3 += r3;
-                recallAt5 += r5;
-                reciprocalRank += rr;
-                ndcgAt5 += ndcg;
-                metrics.put("recallAt1", r1);
-                metrics.put("recallAt3", r3);
-                metrics.put("recallAt5", r5);
-                metrics.put("reciprocalRank", rr);
-                metrics.put("ndcgAt5", ndcg);
+                metrics.put("recallAt1", canonicalMetrics.get(1).recallAtK());
+                metrics.put("recallAt3", canonicalMetrics.get(3).recallAtK());
+                metrics.put("recallAt5", at5.recallAtK());
+                metrics.put("reciprocalRank", at5.reciprocalRank());
+                metrics.put("ndcgAt5", at5.ndcgAtK());
             } else {
-                noAnswer++;
-                boolean returned = !ranked.isEmpty();
-                if (returned) {
-                    noAnswerReturned++;
-                }
-                metrics.put("returnedAnyChunk", returned);
+                metrics.put("returnedAnyChunk", at5.unanswerableFalsePositive() > 0.0);
             }
             metrics.put("staleVersionLeakCount", caseStaleLeaks);
 
@@ -151,17 +162,23 @@ class RagRetrievalSmokeEvalTest {
             caseReports.add(caseReport);
         }
 
+        RetrievalEvalReport at1 = metricsCore.summarizeGroundTruth(
+                canonical.groundTruths(), canonical.resultsAt(1), 1);
+        RetrievalEvalReport at3 = metricsCore.summarizeGroundTruth(
+                canonical.groundTruths(), canonical.resultsAt(3), 3);
+        RetrievalEvalReport at5 = metricsCore.summarizeGroundTruth(
+                canonical.groundTruths(), canonical.resultsAt(5), 5);
         Map<String, Object> overall = new LinkedHashMap<>();
         overall.put("caseCount", cases.size());
-        overall.put("answerableCaseCount", answerable);
-        overall.put("unanswerableCaseCount", noAnswer);
-        overall.put("recallAt1", average(recallAt1, answerable));
-        overall.put("recallAt3", average(recallAt3, answerable));
-        overall.put("recallAt5", average(recallAt5, answerable));
-        overall.put("mrr", average(reciprocalRank, answerable));
-        overall.put("ndcgAt5", average(ndcgAt5, answerable));
+        overall.put("answerableCaseCount", at5.answerableCases());
+        overall.put("unanswerableCaseCount", at5.unanswerableCases());
+        overall.put("recallAt1", at1.macroRecallAtK());
+        overall.put("recallAt3", at3.macroRecallAtK());
+        overall.put("recallAt5", at5.macroRecallAtK());
+        overall.put("mrr", at5.meanReciprocalRank());
+        overall.put("ndcgAt5", at5.macroNdcgAtK());
         overall.put("noAnswerFalsePositiveRate",
-                average(noAnswerReturned, noAnswer));
+                at5.unanswerableFalsePositiveRate());
         overall.put("staleVersionLeakCount", staleLeakCount);
 
         Map<String, Object> report = new LinkedHashMap<>();
@@ -185,8 +202,6 @@ class RagRetrievalSmokeEvalTest {
         report.put("overall", overall);
         report.put("cases", caseReports);
 
-        Path output = Path.of(System.getProperty(
-                "rag.eval.output", "target/rag-eval/latest.json"));
         if (output.getParent() != null) {
             Files.createDirectories(output.getParent());
         }
@@ -194,6 +209,26 @@ class RagRetrievalSmokeEvalTest {
 
         // 效果分数只记录、不设伪门槛；版本泄漏属于可靠性硬门禁，必须为 0。
         assertEquals(0, staleLeakCount, "检索结果不能包含非 ACTIVE 版本");
+    }
+
+    private static Path resolveReportOutput(
+            String explicitOutput, String buildDirectory) {
+        if (explicitOutput != null && !explicitOutput.isBlank()) {
+            return Path.of(explicitOutput);
+        }
+        if (buildDirectory == null || buildDirectory.isBlank()) {
+            throw new IllegalStateException(
+                    "缺少 rag.eval.output 或 rag.eval.buildDirectory");
+        }
+        Path moduleBuildDirectory = Path.of(buildDirectory);
+        if (!moduleBuildDirectory.isAbsolute()) {
+            throw new IllegalStateException(
+                    "rag.eval.buildDirectory 必须是绝对路径: "
+                            + buildDirectory);
+        }
+        return moduleBuildDirectory.resolve("rag-eval")
+                .resolve("latest.json")
+                .normalize();
     }
 
     private List<CorpusRow> readCorpus(Path path) throws IOException {
@@ -265,46 +300,17 @@ class RagRetrievalSmokeEvalTest {
         return chunk;
     }
 
-    private double recallAt(List<Long> ranked, List<Long> relevant, int k) {
-        if (relevant.isEmpty()) {
-            return 0.0;
-        }
-        long hits = ranked.stream().limit(k).filter(relevant::contains).count();
-        return hits / (double) relevant.size();
-    }
-
-    private double reciprocalRank(List<Long> ranked, List<Long> relevant) {
-        for (int index = 0; index < ranked.size(); index++) {
-            if (relevant.contains(ranked.get(index))) {
-                return 1.0 / (index + 1.0);
-            }
-        }
-        return 0.0;
-    }
-
-    private double ndcgAt(List<Long> ranked, List<Long> relevant, int k) {
-        if (relevant.isEmpty()) {
-            return 0.0;
-        }
-        double dcg = 0.0;
-        for (int index = 0; index < Math.min(k, ranked.size()); index++) {
-            if (relevant.contains(ranked.get(index))) {
-                dcg += 1.0 / log2(index + 2.0);
-            }
-        }
-        double idcg = 0.0;
-        for (int index = 0; index < Math.min(k, relevant.size()); index++) {
-            idcg += 1.0 / log2(index + 2.0);
-        }
-        return idcg == 0.0 ? 0.0 : dcg / idcg;
-    }
-
-    private double log2(double value) {
-        return Math.log(value) / Math.log(2.0);
-    }
-
-    private double average(double sum, int count) {
-        return count == 0 ? 0.0 : sum / count;
+    private RetrievalGroundTruth groundTruth(EvalCase evalCase) {
+        return new RetrievalGroundTruth(
+                evalCase.caseId(),
+                evalCase.answerable()
+                        ? Answerability.ANSWERABLE
+                        : Answerability.UNANSWERABLE,
+                Set.copyOf(evalCase.relevantChunkIds()),
+                Set.copyOf(evalCase.relevantChunkIds()),
+                List.of(),
+                Map.of(),
+                Set.of());
     }
 
     private record CorpusRow(

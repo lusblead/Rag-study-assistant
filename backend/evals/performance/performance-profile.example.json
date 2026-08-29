@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "name": "rag-l1-l3-local-baseline",
+  "baseUrl": "http://127.0.0.1:8080",
+  "layers": {
+    "L1": true,
+    "L2": true,
+    "L3": true,
+    "L4": false
+  },
+  "workload": {
+    "fixtureFingerprintSha256": null,
+    "runtimeBuildFingerprintSha256": null,
+    "requestModel": "fixed-payload-per-layer-v1",
+    "corpusDocumentCount": null,
+    "corpusChunkCount": null,
+    "ingestFileSizeBytes": null,
+    "ingestPageCount": null
+  },
+  "load": {
+    "concurrency": [1, 2, 4, 8],
+    "warmupSeconds": 60,
+    "steadyStateSeconds": 180,
+    "rampSeconds": 0,
+    "analysisWindowSeconds": 30,
+    "ingestPollIntervalMs": 1000,
+    "ingestPollTimeoutSeconds": 300
+  },
+  "stopConditions": {
+    "errorRateGreaterThan": 0.01,
+    "p99MultiplierOverLowestConcurrency": 2.0,
+    "p99ConsecutiveWindows": 2,
+    "cpuGreaterThan": 0.85,
+    "cpuConsecutiveSeconds": 120,
+    "memoryGreaterThan": 0.80,
+    "stopOnAny429": true
+  },
+  "execution": {
+    "enabled": false,
+    "disposableStateConfirmed": false
+  },
+  "external": {
+    "mode": "disabled",
+    "costBudgetUsd": 0,
+    "pricingVersion": null,
+    "zeroExternalCallMetricPath": null
+  },
+  "actuator": {
+    "baseUrl": "http://127.0.0.1:8081",
+    "healthPath": "/actuator/health",
+    "infoPath": "/actuator/info",
+    "cpuMetricPath": "/actuator/metrics/process.cpu.usage",
+    "memoryUsedMetricPath": "/actuator/metrics/jvm.memory.used?tag=area:heap",
+    "memoryMaxMetricPath": "/actuator/metrics/jvm.memory.max?tag=area:heap",
+    "sampleIntervalSeconds": 5
+  }
+}

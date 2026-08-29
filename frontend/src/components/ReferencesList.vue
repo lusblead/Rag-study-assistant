@@ -2,6 +2,7 @@
   <div class="references">
     <details v-for="(reference, index) in references" :key="`${reference.documentId}-${reference.chunkId}-${index}`">
       <summary>
+        <strong>[S{{ index + 1 }}]</strong>
         {{ reference.title || `片段 ${reference.chunkId}` }}
         <span v-if="typeof reference.score === 'number'">{{ reference.score.toFixed(3) }}</span>
       </summary>

@@ -1,6 +1,8 @@
 // 持久化执行权，用 owner、期限和版本阻止并发误提交。
 package com.rag.backend.ingestionlab.job;
 
+import com.rag.backend.observability.trace.TraceCarrier;
+
 import java.time.LocalDateTime;
 
 // 持久化 Job 行：描述一次执行尝试，不与 Version 生命周期混用。
@@ -24,6 +26,8 @@ public class IngestJob {
     // 只持久化稳定错误码和脱敏摘要，不把异常堆栈或文档原文写入任务表。
     private String errorCode;
     private String errorDetailDigest;
+    // 首次创建 INGEST Job 时固定；重复提交不得覆盖。correlationId 始终使用 jobId。
+    private String submitTraceparent;
 
     public String getJobId() { return jobId; }
     public void setJobId(String jobId) { this.jobId = jobId; }
@@ -51,4 +55,10 @@ public class IngestJob {
     public void setErrorCode(String errorCode) { this.errorCode = errorCode; }
     public String getErrorDetailDigest() { return errorDetailDigest; }
     public void setErrorDetailDigest(String value) { this.errorDetailDigest = value; }
+    public String getSubmitTraceparent() { return submitTraceparent; }
+    public void setSubmitTraceparent(String value) { this.submitTraceparent = value; }
+
+    public TraceCarrier traceCarrier() {
+        return new TraceCarrier(submitTraceparent, jobId);
+    }
 }

@@ -81,10 +81,78 @@ export type RetrievedChunk = {
   score?: number;
 };
 
+export type EvidenceDecisionMetadata = {
+  decision: "ANSWER" | "CLARIFY" | "REFUSE";
+  reasonCode: string;
+  usableEvidenceIds: number[];
+  missingInformation?: string | null;
+  observedSignals: {
+    retrievedCount: number;
+    deduplicatedCount: number;
+    traceableCount: number;
+    eligibleCount: number;
+    directLexicalCoverage: number;
+    directAnswerShapeObserved: boolean;
+    ambiguousQuestion: boolean;
+    asksAboutConflict: boolean;
+    conflictDetected: boolean;
+    thresholdConfigured: boolean;
+    thresholdScoreKind?: string | null;
+    thresholdCalibrationId?: string | null;
+    appliedThreshold?: number | null;
+    retrievalDegraded: boolean;
+    retrievalEmptyReason: string;
+  };
+  policyVersion: string;
+};
+
+export type RagChatMetadata = {
+  evidenceDecision: EvidenceDecisionMetadata;
+  retrieval: {
+    degraded: boolean;
+    emptyReason: string;
+    sources: Array<{
+      source: string;
+      succeeded: boolean;
+      failureType?: string | null;
+      candidateCount: number;
+      latencyNanos: number;
+    }>;
+    rerank: {
+      requestedReranker: string;
+      actualReranker: string;
+      fallbackReason: string;
+      terminalFailureType: string;
+      semanticEmptyReason: string;
+      appliedThreshold?: number | null;
+      compositeEnabled: boolean;
+      compositeVersion?: string | null;
+      inputCandidateCount: number;
+      outputCandidateCount: number;
+      latencyNanos: number;
+    };
+  };
+  grounding: {
+    status: "NOT_APPLICABLE" | "DISABLED" | "ACCEPTED" | "REPAIRED" | "REJECTED";
+    generationAttempts: number;
+    citationValid?: boolean | null;
+    citationCoverage?: number | null;
+    supportedClaims: number;
+    unsupportedClaims: number;
+    contradictedClaims: number;
+    uncertainClaims: number;
+    failureReason?: string | null;
+    validatorVersion?: string | null;
+    semanticJudgeCalibrationId?: string | null;
+    sourceIds: string[];
+  };
+};
+
 export type RagChatResponse = {
   sessionId: number;
   answer: string;
   references?: RetrievedChunk[];
+  metadata?: RagChatMetadata;
 };
 
 export type ChatSession = {
@@ -245,6 +313,7 @@ export type ModelSettingsTestResponse = {
 export type StreamHandlers = {
   onSession?: (sessionId: number) => void;
   onReferences?: (references: RetrievedChunk[]) => void;
+  onMetadata?: (metadata: RagChatMetadata) => void;
   onDelta?: (delta: string) => void;
   onDone?: () => void;
   onError?: (message: string) => void;

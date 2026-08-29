@@ -2,23 +2,50 @@ package com.rag.backend.agent.evaluation;
 
 import java.util.List;
 
-// 汇总整批样本的平均检索指标和失败明细，供版本之间稳定比较。
+// 汇总整批样本的宏平均检索指标；正例指标只聚合可回答样例。
 public record RetrievalEvalReport(
-        // k：本次指标采用的截断位置；Recall@K、Precision@K 和 NDCG@K 必须使用同一个 K。
+        // 本次所有 @K 指标共用的截断位置。
         int k,
-        // answerableCases：参与可回答指标聚合的样本数；它是宏平均分母，不能与全量样本数混用。
+        // 可回答样例数，也是全部正例宏平均的分母。
         int answerableCases,
-        // unanswerableCases：不可回答样本数量，单独用于空召回和拒答能力统计。
+        // 不可回答样例数，只作为空召回准确率和误召回率的分母。
         int unanswerableCases,
-        // macroRecallAtK：各可回答样本 Recall@K 的宏平均，衡量必要证据被找回的比例。
         double macroRecallAtK,
-        // macroPrecisionAtK：各可回答样本 Precision@K 的宏平均，衡量前 K 个候选中的证据密度。
+        double macroAcceptableRecallAtK,
         double macroPrecisionAtK,
-        // meanReciprocalRank：每个样本首个相关证据排名倒数的平均值，越高表示关键证据越靠前。
         double meanReciprocalRank,
-        // macroNdcgAtK：先按样本计算 NDCG@K 再取平均的排序质量指标，避免大样本支配结果。
+        double meanAcceptableReciprocalRank,
         double macroNdcgAtK,
-        // emptyRetrievalAccuracy：不可回答样本中检索器正确返回空结果的比例，用来衡量系统避免伪证据的能力。
+        double macroAcceptableNdcgAtK,
+        double macroSourceCoverageAtK,
+        double macroRequiredEvidenceGroupCoverageAtK,
+        // 不可回答样例中 TopK 为空的比例；有不可回答样例时与 unanswerableFalsePositiveRate 互补。
         double emptyRetrievalAccuracy,
+        // 不可回答样例中 TopK 非空的比例；无不可回答样例时按约定返回 0.0。
+        double unanswerableFalsePositiveRate,
         List<CaseRetrievalMetrics> cases
-) {}
+) {
+    public RetrievalEvalReport {
+        cases = cases == null ? List.of() : List.copyOf(cases);
+    }
+
+    // 保留原有九参数构造方式的源码兼容性。
+    public RetrievalEvalReport(int k,
+                               int answerableCases,
+                               int unanswerableCases,
+                               double macroRecallAtK,
+                               double macroPrecisionAtK,
+                               double meanReciprocalRank,
+                               double macroNdcgAtK,
+                               double emptyRetrievalAccuracy,
+                               List<CaseRetrievalMetrics> cases) {
+        this(k, answerableCases, unanswerableCases,
+                macroRecallAtK, macroRecallAtK, macroPrecisionAtK,
+                meanReciprocalRank, meanReciprocalRank,
+                macroNdcgAtK, macroNdcgAtK,
+                0.0, 0.0,
+                emptyRetrievalAccuracy,
+                unanswerableCases == 0 ? 0.0 : 1.0 - emptyRetrievalAccuracy,
+                cases);
+    }
+}

@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 在显式提供的临时 MySQL 空库上执行 V1 -> V3。
+ * 在显式提供的临时 MySQL 空库上执行 V1 -> V4。
  * 默认测试集不会连接外部数据库，只有 rag.mysql.it=true 时才运行。
  */
 @EnabledIfSystemProperty(named = "rag.mysql.it", matches = "true")
@@ -32,8 +32,8 @@ class ReliableIngestionMySqlMigrationIT {
                 .validateOnMigrate(true)
                 .load();
         var result = flyway.migrate();
-        assertEquals(3, result.migrationsExecuted,
-                "临时空库必须按顺序执行 V1、V2、V3");
+        assertEquals(4, result.migrationsExecuted,
+                "临时空库必须按顺序执行 V1、V2、V3、V4");
 
         try (Connection connection = DriverManager.getConnection(
                 url, user, password);
@@ -46,11 +46,13 @@ class ReliableIngestionMySqlMigrationIT {
             assertTrue(columnExists(statement, "documents", "active_version_id"));
             assertTrue(columnExists(statement, "ingest_jobs", "document_id"));
             assertTrue(columnExists(statement, "document_versions", "pipeline_manifest"));
+            assertTrue(fullTextIndexExists(statement),
+                    "V4 必须严格创建 title/content ngram FULLTEXT 索引");
         }
     }
 
     @Test
-    void existingPreFlywaySchemaBaselinesAtV1ThenAppliesV2AndV3() throws Exception {
+    void existingPreFlywaySchemaBaselinesAtV1ThenAppliesV2V3AndV4() throws Exception {
         String url = required("rag.mysql.upgradeJdbcUrl");
         String user = required("rag.mysql.user");
         String password = required("rag.mysql.password");
@@ -63,8 +65,8 @@ class ReliableIngestionMySqlMigrationIT {
                 .validateOnMigrate(true)
                 .load();
         var result = flyway.migrate();
-        assertEquals(2, result.migrationsExecuted,
-                "既有业务表应被标记为 V1，只执行 V2、V3");
+        assertEquals(3, result.migrationsExecuted,
+                "既有业务表应被标记为 V1，只执行 V2、V3、V4");
 
         try (Connection connection = DriverManager.getConnection(
                 url, user, password);
@@ -72,6 +74,24 @@ class ReliableIngestionMySqlMigrationIT {
             assertTrue(tableExists(statement, "document_versions"));
             assertTrue(columnExists(statement, "documents", "active_version_id"));
             assertTrue(columnExists(statement, "ingest_jobs", "document_id"));
+            assertTrue(fullTextIndexExists(statement));
+        }
+    }
+
+    private boolean fullTextIndexExists(Statement statement) throws Exception {
+        try (ResultSet rows = statement.executeQuery("""
+                SELECT index_type,
+                       GROUP_CONCAT(column_name ORDER BY seq_in_index) AS columns_in_order
+                  FROM information_schema.statistics
+                 WHERE table_schema = DATABASE()
+                   AND table_name = 'knowledge_chunks'
+                   AND index_name = 'ft_knowledge_chunks_title_content'
+                 GROUP BY index_type
+                """)) {
+            return rows.next()
+                    && "FULLTEXT".equalsIgnoreCase(rows.getString("index_type"))
+                    && "title,content".equalsIgnoreCase(
+                            rows.getString("columns_in_order"));
         }
     }
 

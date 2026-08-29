@@ -847,6 +847,23 @@ label {
   text-align: right;
 }
 
+.decision-diagnostics {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.decision-diagnostics summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.decision-diagnostics div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  padding-top: 5px;
+}
+
 .message-body {
   background: #f4f8f6;
   border: 1px solid var(--line);

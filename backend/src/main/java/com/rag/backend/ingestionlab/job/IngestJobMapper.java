@@ -14,10 +14,10 @@ public interface IngestJobMapper {
     @Insert("""
         INSERT INTO ingest_jobs
         (job_id, document_id, document_version_id, job_type, state, attempt, max_attempts,
-         next_run_at, state_version)
+         next_run_at, state_version, submit_traceparent)
         VALUES
         (#{jobId}, #{documentId}, #{documentVersionId}, #{jobType}, 'QUEUED', 0,
-         #{maxAttempts}, #{nextRunAt}, 0)
+         #{maxAttempts}, #{nextRunAt}, 0, #{submitTraceparent})
         """)
     int insert(IngestJob job);
 

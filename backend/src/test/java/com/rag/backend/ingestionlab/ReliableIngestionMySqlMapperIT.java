@@ -41,6 +41,23 @@ class ReliableIngestionMySqlMapperIT {
     }
 
     @Test
+    void applicationStartupMigratesSchemaBeforeBusinessInitialization() {
+        assertEquals("3", jdbc.queryForObject("""
+                SELECT version
+                FROM flyway_schema_history
+                WHERE success = 1 AND version IS NOT NULL
+                ORDER BY installed_rank DESC
+                LIMIT 1
+                """, String.class));
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM agent_model_settings WHERE id=1",
+                Integer.class));
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM rerank_runtime_settings WHERE id=1",
+                Integer.class));
+    }
+
+    @Test
     void repeatedSubmitAndDeleteUseOneDurableIdentity() {
         jdbc.update("""
                 INSERT INTO courses (id, name, term)

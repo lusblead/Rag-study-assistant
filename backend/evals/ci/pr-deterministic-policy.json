@@ -1,0 +1,53 @@
+{
+  "baselineId": "rag-retrieval-smoke-v1",
+  "baselineSha256": "b30dd799243f5a0f80da41b52e5a2e7f84e8b644a400798d6daeb6f29bf369d4",
+  "caseSetFingerprint": "sha256:a2cf4b5db2ff73889fe4ac660b1ae468edd65b4502f8df998577eea95e709e7b",
+  "comparisonRules": {
+    "ANSWERABLE": {
+      "ndcgAt5": "NOT_LOWER",
+      "recallAt1": "NOT_LOWER",
+      "recallAt3": "NOT_LOWER",
+      "recallAt5": "NOT_LOWER",
+      "reciprocalRank": "NOT_LOWER",
+      "staleVersionLeakCount": "NOT_HIGHER"
+    },
+    "UNANSWERABLE": {
+      "returnedAnyChunk": "FALSE_OR_EQUAL",
+      "staleVersionLeakCount": "NOT_HIGHER"
+    },
+    "overall": {
+      "mrr": "NOT_LOWER",
+      "ndcgAt5": "NOT_LOWER",
+      "noAnswerFalsePositiveRate": "NOT_HIGHER",
+      "recallAt1": "NOT_LOWER",
+      "recallAt3": "NOT_LOWER",
+      "recallAt5": "NOT_LOWER",
+      "staleVersionLeakCount": "NOT_HIGHER"
+    }
+  },
+  "configurationFingerprint": "sha256:ba7014ad3ac7a6d96a037363deb0fa125d82e63dffed547cef795db6e8e14269",
+  "configured": true,
+  "datasetInputFingerprint": "sha256:f2d87dc01b7b906cecdcdaf2b65bbfccb967ef84944a91c1ed50c712502813ff",
+  "datasetVersion": "rag-retrieval-smoke-v1",
+  "deferredOwnerFields": [],
+  "evaluationType": "OFFLINE_MOCK_RETRIEVAL_SMOKE",
+  "frozenFixtureCaseIds": [
+    "S01",
+    "S02",
+    "S03",
+    "S04",
+    "S05",
+    "S06",
+    "S07",
+    "S08",
+    "S09",
+    "S10",
+    "S11",
+    "S12"
+  ],
+  "ownerDecisionRequired": false,
+  "policyId": "pr-deterministic-fixture-no-regression-v1",
+  "policyScope": "ENGINEERING_FIXTURE_NO_REGRESSION",
+  "schema": "rag-tiered-regression-policy/v1",
+  "tier": "PR"
+}

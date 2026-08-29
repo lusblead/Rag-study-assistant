@@ -33,7 +33,13 @@ class MilvusKnowledgeRetrieverActiveVersionTest {
                 -1.0,
                 20);
 
-        assertTrue(retriever.retrieve(7L, "query", 5).isEmpty());
+        RetrievalExecutionResult result = retriever.retrieveWithResult(
+                7L, "query", 5);
+
+        assertTrue(result.chunks().isEmpty());
+        assertEquals(RetrievalDiagnostics.EmptyReason.NO_ACTIVE_VERSION,
+                result.diagnostics().emptyReason());
+        assertTrue(result.diagnostics().sources().isEmpty());
         assertEquals(0, embedding.calls);
         assertEquals(0, chunks.courseFallbackCalls);
     }

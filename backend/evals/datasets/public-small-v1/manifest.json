@@ -1,0 +1,32 @@
+{
+  "candidateK": 8,
+  "datasetId": "public-small-v1",
+  "datasetVersion": "1.0.0",
+  "embeddingDimension": 12,
+  "expectedCaseCount": 12,
+  "expectedChunkCount": 20,
+  "files": {
+    "cases": {
+      "file": "cases.jsonl",
+      "records": 12,
+      "sha256": "ec0e3e31e0a225e62eef4b1ab9fdc38f68e0882f636fb0a14342809e2600e4d6"
+    },
+    "corpus": {
+      "file": "corpus.jsonl",
+      "records": 20,
+      "sha256": "efc70f017f9fd6be34b973ca45fa652cf28fceeaa79c69309004623e9b793121"
+    },
+    "embeddings": {
+      "file": "embeddings.jsonl",
+      "records": 32,
+      "sha256": "2a3c787c4a97062a23d400f332321c491d1ab27f3d6930825366bea92a59a1a0"
+    }
+  },
+  "indexType": "exact-cosine",
+  "license": "CC0-1.0",
+  "schemaVersion": 1,
+  "seed": 20260809,
+  "sourceType": "synthetic-original",
+  "tieBreaker": "score-desc,chunkId-asc",
+  "topK": 5
+}

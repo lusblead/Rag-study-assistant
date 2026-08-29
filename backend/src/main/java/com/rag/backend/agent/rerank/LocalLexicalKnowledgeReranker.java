@@ -2,7 +2,6 @@ package com.rag.backend.agent.rerank;
 
 import com.rag.backend.agent.retrieval.RetrievedChunk;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Component;
 
 import java.util.Comparator;
@@ -12,7 +11,6 @@ import java.util.Locale;
 import java.util.Set;
 
 @Component
-@ConditionalOnExpression("'${rerank.provider:local}' == 'local'")
 // 基于词法命中和向量分数进行本地重排序。
 public class LocalLexicalKnowledgeReranker implements KnowledgeReranker {
     private final double vectorWeight;
@@ -20,6 +18,12 @@ public class LocalLexicalKnowledgeReranker implements KnowledgeReranker {
 
     public LocalLexicalKnowledgeReranker(@Value("${rerank.local.vector-weight:0.7}") double vectorWeight,
                                          @Value("${rerank.local.lexical-weight:0.3}") double lexicalWeight) {
+        validateWeight("vectorWeight", vectorWeight);
+        validateWeight("lexicalWeight", lexicalWeight);
+        if (vectorWeight == 0.0 && lexicalWeight == 0.0) {
+            throw new IllegalArgumentException(
+                    "at least one local rerank weight must be > 0");
+        }
         this.vectorWeight = vectorWeight;
         this.lexicalWeight = lexicalWeight;
     }
@@ -32,7 +36,8 @@ public class LocalLexicalKnowledgeReranker implements KnowledgeReranker {
     public List<RetrievedChunk> rerank(String query, List<RetrievedChunk> chunks, int topK) {
         Set<String> queryTerms = tokenize(query);
         return chunks.stream()
-                .map(chunk -> chunk.withScore(combinedScore(chunk, queryTerms)))
+                .map(chunk -> chunk.withRerankScore(
+                        combinedScore(chunk, queryTerms)))
                 // 分数相同时使用稳定业务 ID，避免底层向量库返回顺序变化污染 A/B 结果。
                 .sorted(Comparator
                         .comparing(RetrievedChunk::score,
@@ -46,7 +51,8 @@ public class LocalLexicalKnowledgeReranker implements KnowledgeReranker {
     }
 
     private double combinedScore(RetrievedChunk chunk, Set<String> queryTerms) {
-        double vectorScore = chunk.score() == null ? 0.0 : chunk.score();
+        Double baseScore = chunk.scores().baseScore();
+        double vectorScore = baseScore == null ? 0.0 : baseScore;
         double lexicalScore = lexicalScore(queryTerms, chunk.content());
         return vectorWeight * vectorScore + lexicalWeight * lexicalScore;
     }
@@ -87,5 +93,12 @@ public class LocalLexicalKnowledgeReranker implements KnowledgeReranker {
             terms.add(piece);
         }
         return terms;
+    }
+
+    private static void validateWeight(String name, double value) {
+        if (!Double.isFinite(value) || value < 0.0) {
+            throw new IllegalArgumentException(
+                    name + " must be finite and >= 0");
+        }
     }
 }

@@ -34,6 +34,7 @@ public class IngestApplicationService {
     public Submission submit(long documentId) {
         // 项目接入登录态后，权限检查必须位于读取文件和提交任务之前。
         CourseDocument document = documents.getById(documentId);
+        //拿到实际的文档在数据库中的path
         Path source = Path.of(document.getFilePath())
                 .toAbsolutePath()
                 .normalize();

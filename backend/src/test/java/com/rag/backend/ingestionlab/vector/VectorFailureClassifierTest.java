@@ -93,6 +93,16 @@ class VectorFailureClassifierTest {
     }
 
     @Test
+    void vectorVisibilityTimeoutIsRetryable() {
+        var failure = classify(new VectorVisibilityTimeoutException(
+                71L, 3, 0, java.time.Duration.ofSeconds(30)));
+
+        assertTrue(failure.retryable());
+        assertFalse(failure.unknown());
+        assertEquals("TIMEOUT", failure.errorCode());
+    }
+
+    @Test
     void ioException_isRetryable() {
         var f = classify(new java.io.IOException("connection reset"));
         assertTrue(f.retryable());

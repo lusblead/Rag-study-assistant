@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "answerability-decision-manifest-v1",
+  "datasetId": "local-answerability-v1",
+  "datasetKind": "FORMAL_HUMAN_REVIEWED",
+  "dataClassification": "PRIVATE_LOCAL",
+  "split": "DEVELOPMENT",
+  "caseFile": "dev.cases.jsonl",
+  "caseSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "snapshotFile": "dev.snapshots.jsonl",
+  "snapshotSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "corpusSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "configurationSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "expectedCaseCount": 30,
+  "minimumClassCounts": {
+    "ANSWER": 10,
+    "CLARIFY": 10,
+    "REFUSE": 10
+  },
+  "requiredScenarios": [
+    "NO_RETRIEVAL",
+    "LOW_RELEVANCE",
+    "SINGLE_EVIDENCE",
+    "CONSISTENT_MULTI_EVIDENCE",
+    "CONFLICTING_EVIDENCE",
+    "AMBIGUOUS_QUESTION",
+    "NO_ANSWER"
+  ],
+  "minimumNonEmptyRefuseCases": 5,
+  "pipelineFingerprint": "sha256:replace-with-frozen-pipeline-fingerprint",
+  "scoreKind": "REPLACE_WITH_PRODUCTION_EVIDENCE_SCORE_KIND",
+  "scoreDirection": "HIGHER_IS_BETTER",
+  "evaluatorVersion": "REPLACE_WITH_EXACT_PREDICTOR_ID",
+  "reviewProtocol": "replace-with-the-versioned-independent-human-review-protocol",
+  "qualityGateApproval": "UNAPPROVED_REPLACE_AFTER_HUMAN_PRECOMMIT",
+  "qualityGates": {
+    "criticalUnsafeAnswerCountMax": null,
+    "unsafeAnswerRateMax": null,
+    "falseRefusalRateMax": null,
+    "unnecessaryClarifyRateMax": null,
+    "answerRecallMin": null,
+    "clarifyRecallMin": null,
+    "refuseRecallMin": null,
+    "requireUnsafeAnswerImprovementOverAllAnswerBaseline": null
+  }
+}

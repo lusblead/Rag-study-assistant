@@ -12,12 +12,16 @@ import org.springframework.stereotype.Component;
 public class PipelineManifestProvider {
     private final String embeddingModel;
     private final int embeddingDimension;
+    private final ChunkProfile chunkProfile;
 
     public PipelineManifestProvider(
             @Value("${embedding.model}") String embeddingModel,
-            @Value("${milvus.embedding-dimension}") int embeddingDimension) {
+            @Value("${milvus.embedding-dimension}") int embeddingDimension,
+            @Value("${ingestion.chunk.fixed-window.size:800}") int chunkSize,
+            @Value("${ingestion.chunk.fixed-window.overlap:120}") int chunkOverlap) {
         this.embeddingModel = embeddingModel;
         this.embeddingDimension = embeddingDimension;
+        this.chunkProfile = new ChunkProfile(chunkSize, chunkOverlap);
     }
 
     public PipelineManifest current() {
@@ -26,8 +30,8 @@ public class PipelineManifestProvider {
                 "1",
                 ParseSnapshot.CURRENT_SCHEMA_VERSION,
                 "fixed-window",
-                800,
-                120,
+                chunkProfile.size(),
+                chunkProfile.overlap(),
                 1,
                 embeddingModel,
                 embeddingDimension,

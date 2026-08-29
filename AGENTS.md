@@ -96,7 +96,7 @@ course/
 
 - JDBC URL 中的 `createDatabaseIfNotExist=true` 自动创建数据库
 - `spring.sql.init.mode=always` + `schema.sql` 自动建表（所有建表语句均使用 `CREATE TABLE IF NOT EXISTS`，可重复执行）
-- 前提：本地 MySQL 服务已运行，root 密码为 `java0975`（开发环境默认值，见 `application.yml`）
+- 前提：本地 MySQL 服务已运行；数据库密码必须通过对应环境变量提供，仓库不设非空默认值（见 `application.yml`）。
 
 建表 SQL：`backend/src/main/resources/db/schema.sql`
 手动初始化脚本：`sql/init.sql`

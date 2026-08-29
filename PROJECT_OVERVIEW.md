@@ -1,6 +1,6 @@
 # RAG Study Assistant 项目功能与结构说明
 
-> 本文依据当前仓库代码整理，快照日期：2026-07-05。接口细节以 Controller 与 `backend/docs/api-guide.md` 为准，运行参数以 `backend/src/main/resources/application.yml` 为准。
+> 本文依据当前仓库根源码整理，快照日期：2026-08-09。接口细节以 Controller 与 `backend/docs/api-guide.md` 为准，运行参数以 `backend/src/main/resources/application.yml` 为准。源码/测试存在与真实生产验收必须分开，验收状态见 `docs/acceptance/RAG_PRODUCTION_E2E_CHECKLIST.md`。
 
 ## 1. 项目定位
 
@@ -22,10 +22,11 @@ RAG Study Assistant 是面向课程资料的学习辅助系统。用户可以创
 - 文件默认保存到 `uploads/documents/{courseId}/`，使用时间戳前缀避免重名。
 - 单文件和单请求最大 100 MB。
 - 支持 TXT、Markdown、DOC、DOCX、PPTX，以及可提取文字的 PDF；PDF 解析还预留了 Tesseract OCR 配置。
-- 上传后可异步提交解析，状态流转为 `UPLOADED -> PARSING -> PARSED/FAILED`。
-- 解析流程包括文档读取、文本清洗、文本切片、Embedding、知识片段入库和向量索引写入。
-- 知识片段正文保存在关系数据库，向量标识与 Milvus 数据关联。
-- 删除文档时清理文件、知识片段和对应向量数据。
+- 两个摄取 HTTP 入口统一调用 `IngestApplicationService.submit`，可靠受理后返回 HTTP 202、`jobId` 与 `documentVersionId`。
+- 当前主链以 `DocumentVersion + IngestJob + IngestStep + Outbox` 编排 Parse、Chunk、Embedding、索引和核验；`documents.parse_status` 仍用于兼容展示，但不是版本化执行状态的唯一真相。
+- 只有核验通过的版本才切换为 ACTIVE；新版失败时保留旧 ACTIVE 版本，在线检索不会读取 BUILDING、INCONSISTENT 或 SUPERSEDED 版本。
+- 知识片段正文和版本身份保存在 MySQL，确定性向量 ID 与版本元数据写入 ingestion v2 Milvus collection。
+- 删除先写 DELETING 墓碑、清 active 指针并提交 DELETE Job，再异步清理向量、制品、知识片段和源文件。
 
 ### 2.3 RAG 课程问答
 
@@ -34,7 +35,10 @@ RAG Study Assistant 是面向课程资料的学习辅助系统。用户可以创
 - 回答可返回引用片段，便于前端展示资料来源。
 - 支持多轮会话、历史消息查询和会话删除。
 - 检索参数包括候选数量、最终 Top-K、相似度阈值和历史消息数量。
-- 支持本地词法/向量混合重排、外部重排服务和不重排模式，并可配置失败时放行。
+- 支持在向量候选上做本地词法加权重排、外部重排服务或不重排，并可配置远端失败时放行；这不是 Dense 与 Sparse 独立双路召回的 Hybrid Search。
+- 当前空检索会继续渲染无课程资料的 Prompt 并调用 LLM，返回空 references；是否改为强制拒答尚无产品规格。
+- 同步和流式模型失败都不会追加本轮成功的 user/assistant 消息，但首次失败可能已经创建空会话；两次消息追加当前也不构成一个跨调用事务。
+- 同步/SSE 的精确时序、ACTIVE-version、Rerank、事件顺序和超时分支见 `docs/feature-flows/rag-question-answer/flow.md`。
 
 ### 2.4 题库与 AI 出题
 
@@ -75,26 +79,30 @@ RAG Study Assistant 是面向课程资料的学习辅助系统。用户可以创
 
 ```text
 创建课程
-  -> 上传文件并创建 documents 记录（UPLOADED）
-  -> 提交异步解析任务（PARSING）
-  -> 按文件类型解析文本
-  -> 清洗并切分文本
-  -> 写入 knowledge_chunks
-  -> 生成 Embedding 并写入本地实现或 Milvus
-  -> 更新文档状态与切片数量（PARSED/FAILED）
+  -> 上传文件并创建 documents 记录
+  -> 任一 HTTP 入口提交 documentId
+  -> 服务端计算内容摘要与 PipelineManifest
+  -> 同事务创建/复用 DocumentVersion、IngestJob、Outbox（HTTP 202）
+  -> Dispatcher/Poller 唤醒持有 Lease 的 Worker
+  -> 可重放 Parse、Chunk、Embedding 与确定性向量写入
+  -> 核对 MySQL/Milvus 完整 ID 集合
+  -> 核验通过后切 ACTIVE 并标记 Job SUCCEEDED
+  -> 失败时持久重试或 FAILED/INCONSISTENT，旧 ACTIVE 版本不变
 ```
 
 ### 3.2 RAG 问答
 
 ```text
 用户选择课程并提问
-  -> 保存/读取会话历史
-  -> 对问题生成向量
-  -> 从课程知识片段中召回候选
-  -> 可选重排与阈值过滤
-  -> 拼装课程上下文和历史消息
-  -> 调用 LLM
-  -> 返回答案、引用和会话 ID
+  -> 解析会话并读取有限历史
+  -> 用历史用户问题和当前问题构造检索 query
+  -> 解析课程 ACTIVE version IDs
+  -> 向量召回并在 MySQL 回表后复核版本
+  -> 按运行时设置执行 none/local/remote Rerank
+  -> 拼装课程上下文和历史消息（空检索仍继续）
+  -> 单次调用 LLM（同步或 SSE）
+  -> 成功后追加 user/assistant；失败不追加本轮成功消息
+  -> 返回 JSON，或发送 session/references/delta/done
 ```
 
 ### 3.3 出题与练习
@@ -126,6 +134,7 @@ Rag-study-assistant/
 │       │   ├── question/           题库、章节标签、批量出题
 │       │   ├── practice/           答题与练习记录
 │       │   ├── rerank/             运行时重排设置
+│       │   ├── ingestionlab/       版本、Job、Lease、Outbox、制品、核验、删除与对账主链
 │       │   └── agent/              RAG、解析、切片、向量、模型、会话等 AI 能力
 │       ├── main/resources/
 │       │   ├── application.yml     默认 MySQL/Milvus/模型配置
@@ -176,6 +185,7 @@ Controller -> Service 接口 -> ServiceImpl -> MyBatis Mapper -> 数据库
 | `agent.chat` / `agent.history` | RAG 问答及会话持久化 |
 | `agent.generation` | AI 题目生成 |
 | `agent.settings` | LLM 与 Embedding 运行时设置 |
+| `ingestionlab` | 当前生产型版本化摄取、Job/Lease/Outbox、核验后激活、删除 Saga 和一致性对账 |
 
 协作约束：`agent` 包属于同学 C 的负责范围，其他模块改动不应顺带修改该包。
 
@@ -185,7 +195,10 @@ Controller -> Service 接口 -> ServiceImpl -> MyBatis Mapper -> 数据库
 |---|---|---|
 | `courses` | 课程基本信息 | 业务数据的顶层归属 |
 | `documents` | 上传文档及解析状态 | `course_id` |
-| `knowledge_chunks` | 文档切片正文与向量状态 | `course_id`、`document_id` |
+| `document_versions` | 同一文档的不可变摄取版本与处理状态 | `document_id`、内容摘要、管线指纹 |
+| `ingest_jobs` / `ingest_steps` | 持久任务、Lease、退避和可重放步骤 | `document_version_id`、`job_id` |
+| `outbox_events` | 与任务受理同事务提交的唤醒事件 | `aggregate_id=job_id` |
+| `knowledge_chunks` | 文档切片正文、版本身份与向量状态 | `course_id`、`document_id`、`document_version_id` |
 | `question_batches` | 一次 AI 出题任务/套卷 | `course_id` |
 | `question_batch_documents` | 出题批次与选中文档的多对多关系 | `batch_id`、`document_id` |
 | `question_batch_chunks` | 出题批次与引用切片的多对多关系 | `batch_id`、`chunk_id` |
@@ -281,6 +294,10 @@ Controller -> Service 接口 -> ServiceImpl -> MyBatis Mapper -> 数据库
 docker compose up -d --build
 ```
 
+该命令是当前完整模式入口，不等于全新环境已经验收。2026-08-09 的隔离空库实测中，backend
+在 Flyway 运行前查询模型设置表并退出；显式迁移后才能继续后续链路。修复前必须以健康检查和
+日志判断启动结果，证据见 `docs/acceptance/runs/2026-08-09-RAG-ISOLATED-E2E.md`。
+
 默认地址：
 
 | 服务 | 地址 |
@@ -308,9 +325,13 @@ npm install
 npm run dev
 ```
 
-### 9.3 Windows 一键便携模式
+### 9.3 portable 历史快照
 
-执行 `start.bat`。发布脚本会准备便携 JDK/Node 及构建产物；该模式使用 H2 文件数据库、本地检索和后端静态托管前端，不要求安装 Docker、MySQL 或 Milvus。相关说明见 `QUICKSTART.md` 和 `scripts/package-release.ps1`。
+仓库根 `start.bat` 当前固定调用 `scripts/start.ps1` 并要求 Docker；根源码没有可用的
+`application-portable.yml`。`release/Rag-study-assistant-one-click/` 中的 H2、本地向量与
+`portable-start.ps1` 属于旧 release 快照，缺少当前 ingestionlab 主链，不能代表当前源码、
+生产路径或端到端验收。恢复 portable 需要单独同步 profile、schema/migration、本地版本化
+向量端口和启动/重启验收；当前不宣称已完成。详见 `QUICKSTART.md`。
 
 ## 10. 常用命令
 
@@ -336,7 +357,7 @@ npm --prefix frontend run build
 | 环境变量 | 默认值/说明 |
 |---|---|
 | `SPRING_DATASOURCE_URL` | MySQL `rag_study_assistant` 数据库连接 |
-| `MYSQL_USER` / `MYSQL_PASSWORD` | 默认 `root` / `root` |
+| `MYSQL_USER` / `MYSQL_PASSWORD` | 通过环境变量显式设置；`MYSQL_PASSWORD` 无字面默认值 |
 | `APP_UPLOAD_DIR` | 默认 `./uploads` |
 | `VECTOR_PROVIDER` | 默认 `milvus` |
 | `MILVUS_HOST` / `MILVUS_PORT` | 默认 `localhost:19530` |
@@ -356,7 +377,7 @@ npm --prefix frontend run build
 
 ## 12. 开发注意事项
 
-- 不要创建或修改 `com.rag.backend.agent` 包下内容，除非由负责该模块的同学明确安排。
+- 修改范围以仓库根 `AGENTS.md` 与当前任务为准；允许修改 `agent`，但必须保持模块职责并保留他人的无关改动。
 - MySQL 与 H2 各有一份 schema，修改表结构时应同步维护 `schema.sql`、`schema-h2.sql`，必要时同步 `sql/init.sql` 和兼容迁移代码。
 - Embedding 模型变化时应同步核对 `EMBEDDING_DIMENSION` 和 Milvus Collection；维度不匹配会导致向量写入或检索失败。
 - 外部模型 Key 通过环境变量或设置页面配置，不应写入 Git 跟踪文件。

@@ -19,7 +19,7 @@ class MilvusConsistentVectorStoreIT {
     private static final int DIMENSION = 64;
 
     @Test
-    void realMilvusKeepsIdentityAndFiltersInactiveVersions() throws Exception {
+    void realMilvusKeepsIdentityAndWaitsForVersionVisibility() throws Exception {
         String host = System.getProperty("rag.milvus.host", "127.0.0.1");
         int port = Integer.parseInt(System.getProperty(
                 "rag.milvus.port", "39530"));
@@ -33,7 +33,8 @@ class MilvusConsistentVectorStoreIT {
         try {
             store.upsert(record(7001L, 1001L, activeVersion, axis(0)));
             store.upsert(record(7991L, 1991L, staleVersion, axis(0)));
-            await(() -> store.find(7001L).isPresent(), Duration.ofSeconds(10));
+            store.awaitVersionVisible(
+                    activeVersion, 1, Duration.ofSeconds(10));
 
             var metadata = store.find(7001L).orElseThrow();
             assertEquals(1001L, metadata.mysqlChunkId());

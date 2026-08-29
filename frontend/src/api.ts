@@ -18,6 +18,7 @@ import type {
   Question,
   QuestionBatchDetail,
   QuestionGenerationPayload,
+  RagChatMetadata,
   RagChatResponse,
   RerankSettingsResponse,
   RetrievedChunk,
@@ -362,6 +363,14 @@ function dispatchSseBlock(block: string, handlers: StreamHandlers) {
 
   if (eventName === "references") {
     handlers.onReferences?.(parseJson<RetrievedChunk[]>(data) || []);
+    return;
+  }
+
+  if (eventName === "metadata") {
+    const metadata = parseJson<RagChatMetadata>(data);
+    if (metadata) {
+      handlers.onMetadata?.(metadata);
+    }
     return;
   }
 

@@ -28,6 +28,9 @@ public final class VectorFailureClassifier {
         Throwable root = unwrap(error);
 
         // 4. 按根因类型逐类映射。
+        if (root instanceof VectorVisibilityTimeoutException) {
+            return VectorFailure.retryable("TIMEOUT", 0);
+        }
         if (root instanceof MilvusSdkException m) {
             return classifyHttpStatus(m.httpStatus(), root);
         }

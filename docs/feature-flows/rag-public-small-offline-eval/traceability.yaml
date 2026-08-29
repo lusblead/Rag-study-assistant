@@ -1,0 +1,171 @@
+version: 1
+feature_id: "rag.public-small-offline-eval"
+title: "Public small offline retrieval evaluation"
+status: "implemented"
+
+characteristics:
+  cross_component: true
+  asynchronous: false
+  persisted_state: false
+  external_dependencies: false
+  retry_or_compensation: false
+  security_sensitive: true
+
+nodes:
+  E1:
+    kind: entry
+    description: Run the repository-local public-small-v1 retrieval A/B command
+    trigger: PowerShell command run_public_small_retrieval_ab.ps1
+    code:
+      - path: backend/evals/scripts/run_public_small_retrieval_ab.ps1
+        symbol: Invoke-PublicSmallRetrievalAb
+
+  D1:
+    kind: decision
+    description: Dataset structure, checksums, stable ordering and privacy gate all pass
+    condition: Every core file matches the manifest and checksum list, references are closed, IDs are sorted and unique, and no forbidden privacy pattern is present
+    code:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/eval/PublicSmallDatasetSupport.java
+        symbol: PublicSmallDatasetSupport.loadAndValidate
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/eval/PublicSmallDatasetValidationTest.java
+        symbol: validatesVersionedDatasetChecksumsOrderingAndCoverage
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/eval/PublicSmallDatasetValidationTest.java
+        symbol: rejectsPrivateAndCredentialLikeContent
+
+  A1:
+    kind: action
+    description: Build one deterministic exact-cosine candidate list per case
+    code:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/eval/PublicSmallRetrievalAbTest.java
+        symbol: exactCosineCandidates
+
+  A2:
+    kind: action
+    description: Pair both schemes with identical corpus, cases, vectors, candidates, candidateK, topK and seed
+    code:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/eval/PublicSmallRetrievalAbTest.java
+        symbol: evaluateComparison
+
+  A3:
+    kind: action
+    description: Scheme A preserves the exact-cosine candidate order
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/rerank/NoOpKnowledgeReranker.java
+        symbol: NoOpKnowledgeReranker.rerank
+
+  A4:
+    kind: action
+    description: Scheme B applies the currently wired local lexical reranker
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/rerank/LocalLexicalKnowledgeReranker.java
+        symbol: LocalLexicalKnowledgeReranker.rerank
+
+  A5:
+    kind: action
+    description: Calculate per-case and aggregate retrieval metrics and classify paired changes
+    code:
+      - path: backend/src/test/java/com/rag/backend/agent/evaluation/RetrievalMetricsCalculator.java
+        symbol: RetrievalMetricsCalculator.evaluateCase
+      - path: backend/src/test/java/com/rag/backend/agent/evaluation/RetrievalMetricsCalculator.java
+        symbol: RetrievalMetricsCalculator.summarize
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/evaluation/RetrievalMetricsCalculatorTest.java
+        symbol: calculatesRecallMrrNdcgSourceAndEvidenceGroupCoverage
+      - path: backend/src/test/java/com/rag/backend/agent/evaluation/RetrievalMetricsCalculatorTest.java
+        symbol: definesEmptyDuplicateAlternativeAndZeroDenominatorBehavior
+
+  D2:
+    kind: decision
+    description: Repeated evaluation yields identical rankings, metrics and Markdown body
+    condition: Two executions over the same validated snapshot are byte-for-byte equal
+    code:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/eval/PublicSmallRetrievalAbTest.java
+        symbol: renderMarkdown
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/eval/PublicSmallRetrievalAbTest.java
+        symbol: reportIsByteStableAcrossRepeatedRuns
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/eval/PublicSmallRetrievalAbTest.java
+        symbol: bothSchemesShareEveryConfigurationExceptReranker
+
+  A6:
+    kind: action
+    description: Write the reproducible Markdown A/B report with configuration, cases, aggregates and regressions
+    code:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/eval/PublicSmallRetrievalAbTest.java
+        symbol: writeMarkdownReport
+
+  G1:
+    kind: safeguard
+    description: Public dataset privacy and provenance gate
+    safeguard_type: privacy
+    guarantee: Public corpus and cases contain only declared neutral synthetic content and reject user paths, personal contact data, credential-like values and private knowledge-base identifiers
+    protects: [D1]
+    failure_behavior: Validation throws before candidate generation and no report is accepted
+    code:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/eval/PublicSmallDatasetSupport.java
+        symbol: scanPrivacy
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/eval/PublicSmallDatasetValidationTest.java
+        symbol: rejectsPrivateAndCredentialLikeContent
+
+  G2:
+    kind: safeguard
+    description: Frozen input and deterministic ordering gate
+    safeguard_type: integrity
+    guarantee: Core file hashes, counts, stable IDs, seed and exact-cosine tie breaking prevent silent dataset or ordering drift
+    protects: [D1, A1]
+    failure_behavior: Any mismatch fails before metrics and identifies the invalid contract field
+    code:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/eval/PublicSmallDatasetSupport.java
+        symbol: verifyChecksums
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/eval/PublicSmallRetrievalAbTest.java
+        symbol: exactCosineCandidates
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/eval/PublicSmallDatasetValidationTest.java
+        symbol: checksumTamperIsRejected
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/eval/PublicSmallRetrievalAbTest.java
+        symbol: reportIsByteStableAcrossRepeatedRuns
+
+  G3:
+    kind: safeguard
+    description: Single-variable paired A/B comparison
+    safeguard_type: integrity
+    guarantee: The only changed configuration field is reranker, from none to local lexical with fixed weights
+    protects: [A2, A3, A4]
+    failure_behavior: The comparison test fails if any frozen configuration or candidate order differs
+    code:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/eval/PublicSmallRetrievalAbTest.java
+        symbol: evaluateComparison
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/eval/PublicSmallRetrievalAbTest.java
+        symbol: bothSchemesShareEveryConfigurationExceptReranker
+
+  G4:
+    kind: safeguard
+    description: Complete and bounded report contract
+    safeguard_type: validation
+    guarantee: Report contains both configurations, every case, aggregate metrics, paired improvements and regressions, and an explicit fixture-only evidence boundary
+    protects: [A6]
+    failure_behavior: Missing sections or overstated evidence make the report test fail
+    code:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/eval/PublicSmallRetrievalAbTest.java
+        symbol: renderMarkdown
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/eval/PublicSmallRetrievalAbTest.java
+        symbol: reportContainsConfigurationCasesAggregatesAndRegressions
+
+  X1:
+    kind: outcome
+    description: Dataset rejected before evaluation
+    result: Non-zero command result and no accepted report
+
+  X2:
+    kind: outcome
+    description: Evaluation rejected as non-reproducible
+    result: Non-zero command result with the differing rankings, metrics or report assertion
+
+  X3:
+    kind: outcome
+    description: Public small offline A/B report completed
+    result: Reproducible Markdown report generated without network, credentials, private data or business persistence

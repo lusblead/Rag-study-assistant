@@ -457,7 +457,79 @@ Course course = courseMapper.selectById(courseId);
 
 ---
 
-## 七、通用响应格式
+## 七、RAG 问答接口
+
+> 本节仅描述当前 `RagChatController`、`RagChatResponse` 与前端类型已经实现的响应契约；不代表生产验收、模型质量或外部服务可用性。
+
+### 7.1 同步问答
+
+```
+POST /api/agent/chat
+Content-Type: application/json
+```
+
+**请求体：**
+
+```json
+{
+  "courseId": 1,
+  "sessionId": 12,
+  "question": "OSI 模型中网络层的职责是什么？"
+}
+```
+
+`courseId` 和非空 `question` 为必填；`sessionId` 可省略或为 `null`。
+
+成功时仍使用统一 `Result` 信封，`data` 为：
+
+```json
+{
+  "sessionId": 12,
+  "answer": "...",
+  "references": [],
+  "metadata": {
+    "evidenceDecision": { "decision": "ANSWER", "reasonCode": "..." },
+    "retrieval": { "degraded": false, "emptyReason": "NONE" },
+    "grounding": { "status": "ACCEPTED", "generationAttempts": 1 }
+  }
+}
+```
+
+`references` 与 `metadata` 在前端类型中均为可选字段；兼容旧构造响应时可能缺失。`metadata` 存在时包含以下脱敏诊断：
+
+| 路径 | 字段 |
+|------|------|
+| `evidenceDecision` | `decision`（`ANSWER` / `CLARIFY` / `REFUSE`）、`reasonCode`、`usableEvidenceIds`、可选 `missingInformation`、`observedSignals`、`policyVersion` |
+| `evidenceDecision.observedSignals` | 检索计数、词法覆盖与歧义/冲突信号；阈值相关的 `thresholdScoreKind`、`thresholdCalibrationId`、`appliedThreshold` 可为空或缺失 |
+| `retrieval` | `degraded`、`emptyReason`、各来源的 `source` / `succeeded` / 可选 `failureType` / `candidateCount` / `latencyNanos` |
+| `retrieval.rerank` | 请求与实际 reranker、降级与失败原因、可选 `appliedThreshold` 与 `compositeVersion`、候选数和 `latencyNanos` |
+| `retrieval.diversity` | 后端对象还可序列化多样性选择诊断：`enabled`、`strategy`、可选 `lambda`、输入/输出候选数、冗余度、唯一文档数和 `latencyNanos`；当前前端 `RagChatMetadata` 类型未声明该子对象，客户端不应依赖它 |
+| `grounding` | `status`（`NOT_APPLICABLE` / `DISABLED` / `ACCEPTED` / `REPAIRED` / `REJECTED`）、`generationAttempts`、引用与 claim 计数、`sourceIds`；`citationValid`、`citationCoverage`、`failureReason`、`validatorVersion`、`semanticJudgeCalibrationId` 可为 `null` 或缺失 |
+
+### 7.2 流式问答（SSE）
+
+```
+POST /api/agent/chat/stream
+Accept: text/event-stream
+Content-Type: application/json
+```
+
+请求体与同步问答相同。服务端依次发送 `session`、`references`、`metadata` 事件，再发送零个或多个 `delta`，成功结束发送 `done`。`metadata` 的 `data` 是与同步响应 `metadata` 相同的 JSON 对象，不包裹在 `Result` 信封中；其字段与可选性遵循 7.1。
+
+| SSE event | `data` |
+|------|------|
+| `session` | `{ "sessionId": 12 }` |
+| `references` | 检索片段数组 |
+| `metadata` | `RagChatMetadata` JSON 对象 |
+| `delta` | 单个文本片段 |
+| `done` | `"[DONE]"` |
+| `error` | `{ "code": "CHAT_STREAM_FAILED", "message": "聊天处理失败，请稍后重试" }` |
+
+客户端应将 `metadata` 视为诊断信息，而不是业务成功、检索质量或生产可用性的证明。
+
+---
+
+## 八、通用响应格式
 
 所有接口统一返回：
 
@@ -486,7 +558,7 @@ throw new BizException(400, "自定义错误信息");
 
 ---
 
-## 八、配置文件说明
+## 九、配置文件说明
 
 `application.yml` 由后端负责人统一维护，关键配置项：
 
@@ -501,7 +573,7 @@ throw new BizException(400, "自定义错误信息");
 
 ---
 
-## 九、启动方式
+## 十、启动方式
 
 ```bash
 # 从仓库根目录执行

@@ -1,0 +1,408 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="RAG L1-L3 Local Performance" enabled="true">
+      <stringProp name="TestPlan.comments">JMeter 5.6.3; payloads and token are process-environment only; L4 is deferred.</stringProp>
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <boolProp name="TestPlan.tearDown_on_shutdown">true</boolProp>
+      <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="Plan metadata" enabled="true">
+        <collectionProp name="Arguments.arguments">
+          <elementProp name="PERF_PLAN_JMETER_VERSION" elementType="Argument">
+            <stringProp name="Argument.name">PERF_PLAN_JMETER_VERSION</stringProp>
+            <stringProp name="Argument.value">5.6.3</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+        </collectionProp>
+      </elementProp>
+      <stringProp name="TestPlan.user_define_classpath"></stringProp>
+    </TestPlan>
+    <hashTree>
+      <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="Safe request headers" enabled="true">
+        <collectionProp name="HeaderManager.headers">
+          <elementProp name="Content-Type" elementType="Header">
+            <stringProp name="Header.name">Content-Type</stringProp>
+            <stringProp name="Header.value">application/json</stringProp>
+          </elementProp>
+          <elementProp name="X-Performance-Token" elementType="Header">
+            <stringProp name="Header.name">X-Performance-Token</stringProp>
+            <stringProp name="Header.value">${__groovy(System.getenv('RAG_PERFORMANCE_TOKEN') ?: '')}</stringProp>
+          </elementProp>
+        </collectionProp>
+      </HeaderManager>
+      <hashTree/>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="Selected layer load" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="Duration loop" enabled="true">
+          <boolProp name="LoopController.continue_forever">true</boolProp>
+          <stringProp name="LoopController.loops">-1</stringProp>
+        </elementProp>
+        <stringProp name="ThreadGroup.num_threads">${__P(PERF_THREADS,1)}</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">${__P(PERF_RAMP_SECONDS,1)}</stringProp>
+        <boolProp name="ThreadGroup.scheduler">true</boolProp>
+        <stringProp name="ThreadGroup.duration">${__P(PERF_DURATION_SECONDS,1)}</stringProp>
+        <stringProp name="ThreadGroup.delay">0</stringProp>
+        <boolProp name="ThreadGroup.same_user_on_next_iteration">true</boolProp>
+      </ThreadGroup>
+      <hashTree>
+        <IfController guiclass="IfControllerPanel" testclass="IfController" testname="Static validation guard" enabled="true">
+          <stringProp name="IfController.condition">${__groovy(props.get('PERF_VALIDATE_ONLY'\,'true').toBoolean())}</stringProp>
+          <boolProp name="IfController.evaluateAll">false</boolProp>
+          <boolProp name="IfController.useExpression">true</boolProp>
+        </IfController>
+        <hashTree>
+          <JSR223Sampler guiclass="TestBeanGUI" testclass="JSR223Sampler" testname="STATIC-validation-noop" enabled="true">
+            <stringProp name="scriptLanguage">groovy</stringProp>
+            <boolProp name="cacheKey">true</boolProp>
+            <stringProp name="script">SampleResult.setSuccessful(true)
+SampleResult.setResponseCode('200')
+SampleResult.setResponseData(new byte[0])</stringProp>
+          </JSR223Sampler>
+          <hashTree/>
+        </hashTree>
+        <IfController guiclass="IfControllerPanel" testclass="IfController" testname="Execution guard" enabled="true">
+          <stringProp name="IfController.condition">${__groovy(!props.get('PERF_VALIDATE_ONLY'\,'true').toBoolean())}</stringProp>
+          <boolProp name="IfController.evaluateAll">false</boolProp>
+          <boolProp name="IfController.useExpression">true</boolProp>
+        </IfController>
+        <hashTree>
+          <IfController guiclass="IfControllerPanel" testclass="IfController" testname="L1 branch" enabled="true">
+            <stringProp name="IfController.condition">${__groovy(props.get('PERF_LAYER'\,'') == 'L1')}</stringProp>
+            <boolProp name="IfController.evaluateAll">false</boolProp>
+            <boolProp name="IfController.useExpression">true</boolProp>
+          </IfController>
+          <hashTree>
+            <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="L1-retrieval" enabled="true">
+              <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+                <collectionProp name="Arguments.arguments">
+                  <elementProp name="" elementType="HTTPArgument">
+                    <boolProp name="HTTPArgument.always_encode">false</boolProp>
+                    <stringProp name="Argument.value">${__groovy(System.getenv('RAG_PERFORMANCE_L1_BODY') ?: '')}</stringProp>
+                    <stringProp name="Argument.metadata">=</stringProp>
+                  </elementProp>
+                </collectionProp>
+              </elementProp>
+              <stringProp name="HTTPSampler.domain">${__P(PERF_HOST,127.0.0.1)}</stringProp>
+              <stringProp name="HTTPSampler.port">${__P(PERF_PORT,8080)}</stringProp>
+              <stringProp name="HTTPSampler.protocol">${__P(PERF_PROTOCOL,http)}</stringProp>
+              <stringProp name="HTTPSampler.contentEncoding">UTF-8</stringProp>
+              <stringProp name="HTTPSampler.path">/internal/performance/retrieval</stringProp>
+              <stringProp name="HTTPSampler.method">POST</stringProp>
+              <boolProp name="HTTPSampler.follow_redirects">false</boolProp>
+              <boolProp name="HTTPSampler.auto_redirects">false</boolProp>
+              <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+              <boolProp name="HTTPSampler.DO_MULTIPART_POST">false</boolProp>
+              <boolProp name="HTTPSampler.postBodyRaw">true</boolProp>
+              <stringProp name="HTTPSampler.connect_timeout">5000</stringProp>
+              <stringProp name="HTTPSampler.response_timeout">30000</stringProp>
+            </HTTPSamplerProxy>
+            <hashTree>
+              <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="L1 requires HTTP 200" enabled="true">
+                <collectionProp name="Asserion.test_strings"><stringProp name="200">200</stringProp></collectionProp>
+                <stringProp name="Assertion.test_field">Assertion.response_code</stringProp>
+                <boolProp name="Assertion.assume_success">false</boolProp>
+                <intProp name="Assertion.test_type">8</intProp>
+              </ResponseAssertion>
+              <hashTree/>
+              <JSONPathAssertion guiclass="JSONPathAssertionGui" testclass="JSONPathAssertion" testname="L1 requires degraded=false" enabled="true">
+                <stringProp name="JSON_PATH">$.degraded</stringProp>
+                <stringProp name="EXPECTED_VALUE">false</stringProp>
+                <boolProp name="JSONVALIDATION">true</boolProp>
+                <boolProp name="EXPECT_NULL">false</boolProp>
+                <boolProp name="INVERT">false</boolProp>
+                <boolProp name="ISREGEX">false</boolProp>
+              </JSONPathAssertion>
+              <hashTree/>
+              <JSONPathAssertion guiclass="JSONPathAssertionGui" testclass="JSONPathAssertion" testname="L1 requires status success" enabled="true">
+                <stringProp name="JSON_PATH">$.status</stringProp>
+                <stringProp name="EXPECTED_VALUE">success</stringProp>
+                <boolProp name="JSONVALIDATION">true</boolProp>
+                <boolProp name="EXPECT_NULL">false</boolProp>
+                <boolProp name="INVERT">false</boolProp>
+                <boolProp name="ISREGEX">false</boolProp>
+              </JSONPathAssertion>
+              <hashTree/>
+              <JSR223PostProcessor guiclass="TestBeanGUI" testclass="JSR223PostProcessor" testname="L1-retrieval stop immediately on HTTP 429" enabled="true">
+                <stringProp name="scriptLanguage">groovy</stringProp>
+                <boolProp name="cacheKey">true</boolProp>
+                <stringProp name="script">if (prev != null &amp;&amp; prev.getResponseCode() == '429') {
+    props.put('PERF_STOP_REASON', 'HTTP_429')
+    prev.setSuccessful(false)
+    prev.setStopTestNow(true)
+}</stringProp>
+              </JSR223PostProcessor>
+              <hashTree/>
+            </hashTree>
+          </hashTree>
+          <IfController guiclass="IfControllerPanel" testclass="IfController" testname="L2 branch" enabled="true">
+            <stringProp name="IfController.condition">${__groovy(props.get('PERF_LAYER'\,'') == 'L2')}</stringProp>
+            <boolProp name="IfController.evaluateAll">false</boolProp>
+            <boolProp name="IfController.useExpression">true</boolProp>
+          </IfController>
+          <hashTree>
+            <JSR223Sampler guiclass="TestBeanGUI" testclass="JSR223Sampler" testname="L2-acquire-unique-document" enabled="true">
+              <stringProp name="scriptLanguage">groovy</stringProp>
+              <boolProp name="cacheKey">true</boolProp>
+              <stringProp name="script">def ids = props.get('PERF_DOCUMENT_ID_POOL_PARSED')
+def counter = props.get('PERF_DOCUMENT_ID_POOL_COUNTER')
+if (ids == null || counter == null) {
+    synchronized (props) {
+        ids = props.get('PERF_DOCUMENT_ID_POOL_PARSED')
+        counter = props.get('PERF_DOCUMENT_ID_POOL_COUNTER')
+        if (ids == null || counter == null) {
+            def raw = System.getenv('RAG_PERFORMANCE_DOCUMENT_ID_POOL') ?: '[]'
+            ids = new groovy.json.JsonSlurper().parseText(raw)
+            counter = new java.util.concurrent.atomic.AtomicInteger(0)
+            props.put('PERF_DOCUMENT_ID_POOL_PARSED', ids)
+            props.put('PERF_DOCUMENT_ID_POOL_COUNTER', counter)
+        }
+    }
+}
+int index = counter.getAndIncrement()
+SampleResult.setResponseData(new byte[0])
+if (index &gt;= ids.size()) {
+    vars.put('PERF_DOCUMENT_ID', '__EXHAUSTED__')
+    SampleResult.setSuccessful(false)
+    SampleResult.setResponseCode('598')
+    SampleResult.setResponseMessage('unique disposable document pool exhausted')
+    SampleResult.setStopThread(true)
+} else {
+    vars.put('PERF_DOCUMENT_ID', ids[index].toString())
+    SampleResult.setSuccessful(true)
+    SampleResult.setResponseCode('200')
+}</stringProp>
+            </JSR223Sampler>
+            <hashTree/>
+            <TransactionController guiclass="TransactionControllerGui" testclass="TransactionController" testname="L2-ingest-terminal" enabled="true">
+              <boolProp name="TransactionController.includeTimers">true</boolProp>
+              <boolProp name="TransactionController.parent">true</boolProp>
+            </TransactionController>
+            <hashTree>
+              <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="L2-ingest-submit" enabled="true">
+                <elementProp name="HTTPsampler.Arguments" elementType="Arguments"><collectionProp name="Arguments.arguments"/></elementProp>
+                <stringProp name="HTTPSampler.domain">${__P(PERF_HOST,127.0.0.1)}</stringProp>
+                <stringProp name="HTTPSampler.port">${__P(PERF_PORT,8080)}</stringProp>
+                <stringProp name="HTTPSampler.protocol">${__P(PERF_PROTOCOL,http)}</stringProp>
+                <stringProp name="HTTPSampler.path">/api/documents/${PERF_DOCUMENT_ID}/ingest</stringProp>
+                <stringProp name="HTTPSampler.method">POST</stringProp>
+                <boolProp name="HTTPSampler.follow_redirects">false</boolProp>
+                <boolProp name="HTTPSampler.auto_redirects">false</boolProp>
+                <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+                <boolProp name="HTTPSampler.postBodyRaw">false</boolProp>
+                <stringProp name="HTTPSampler.connect_timeout">5000</stringProp>
+                <stringProp name="HTTPSampler.response_timeout">30000</stringProp>
+              </HTTPSamplerProxy>
+              <hashTree>
+                <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="L2 submit requires HTTP 202" enabled="true">
+                  <collectionProp name="Asserion.test_strings"><stringProp name="202">202</stringProp></collectionProp>
+                  <stringProp name="Assertion.test_field">Assertion.response_code</stringProp>
+                  <boolProp name="Assertion.assume_success">false</boolProp>
+                  <intProp name="Assertion.test_type">8</intProp>
+                </ResponseAssertion>
+                <hashTree/>
+                <JSONPostProcessor guiclass="JSONPostProcessorGui" testclass="JSONPostProcessor" testname="Extract transient job acceptance" enabled="true">
+                  <stringProp name="JSONPostProcessor.referenceNames">PERF_JOB_ID;PERF_JOB_REUSED</stringProp>
+                  <stringProp name="JSONPostProcessor.jsonPathExprs">$.data.jobId;$.data.reused</stringProp>
+                  <stringProp name="JSONPostProcessor.match_numbers">1;1</stringProp>
+                  <stringProp name="JSONPostProcessor.defaultValues">__MISSING__;__MISSING__</stringProp>
+                </JSONPostProcessor>
+                <hashTree/>
+                <JSR223PostProcessor guiclass="TestBeanGUI" testclass="JSR223PostProcessor" testname="Initialize bounded poll" enabled="true">
+                  <stringProp name="scriptLanguage">groovy</stringProp>
+                  <boolProp name="cacheKey">true</boolProp>
+                  <stringProp name="script">if (vars.get('PERF_JOB_REUSED') == 'false') {
+    vars.put('PERF_JOB_STATE', 'QUEUED')
+} else {
+    vars.put('PERF_JOB_STATE', '__REUSED__')
+    prev.setSuccessful(false)
+    prev.setResponseCode('597')
+    prev.setResponseMessage('ingest submission reused an existing job')
+}
+vars.put('PERF_POLL_COUNT', '0')
+long timeoutMs = props.get('PERF_POLL_TIMEOUT_MS', '300000') as long
+long intervalMs = Math.max(1L, props.get('PERF_POLL_INTERVAL_MS', '1000') as long)
+vars.put('PERF_POLL_MAX', Long.toString(Math.max(1L, (long)Math.ceil(timeoutMs / (double)intervalMs))))</stringProp>
+                </JSR223PostProcessor>
+                <hashTree/>
+                <JSR223PostProcessor guiclass="TestBeanGUI" testclass="JSR223PostProcessor" testname="L2-ingest-submit stop immediately on HTTP 429" enabled="true">
+                  <stringProp name="scriptLanguage">groovy</stringProp>
+                  <boolProp name="cacheKey">true</boolProp>
+                  <stringProp name="script">if (prev != null &amp;&amp; prev.getResponseCode() == '429') {
+    props.put('PERF_STOP_REASON', 'HTTP_429')
+    prev.setSuccessful(false)
+    prev.setStopTestNow(true)
+}</stringProp>
+                </JSR223PostProcessor>
+                <hashTree/>
+              </hashTree>
+              <WhileController guiclass="WhileControllerGui" testclass="WhileController" testname="Poll until terminal or timeout" enabled="true">
+                <stringProp name="WhileController.condition">${__groovy(vars.get('PERF_JOB_ID') != '__MISSING__' &amp;&amp; vars.get('PERF_JOB_REUSED') == 'false' &amp;&amp; !['SUCCEEDED'\,'FAILED'\,'CANCELLED'].contains(vars.get('PERF_JOB_STATE')) &amp;&amp; (vars.get('PERF_POLL_COUNT') as int) &lt; (vars.get('PERF_POLL_MAX') as int))}</stringProp>
+              </WhileController>
+              <hashTree>
+                <ConstantTimer guiclass="ConstantTimerGui" testclass="ConstantTimer" testname="L2 poll interval" enabled="true">
+                  <stringProp name="ConstantTimer.delay">${__P(PERF_POLL_INTERVAL_MS,1000)}</stringProp>
+                </ConstantTimer>
+                <hashTree/>
+                <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="L2-ingest-poll" enabled="true">
+                  <elementProp name="HTTPsampler.Arguments" elementType="Arguments"><collectionProp name="Arguments.arguments"/></elementProp>
+                  <stringProp name="HTTPSampler.domain">${__P(PERF_HOST,127.0.0.1)}</stringProp>
+                  <stringProp name="HTTPSampler.port">${__P(PERF_PORT,8080)}</stringProp>
+                  <stringProp name="HTTPSampler.protocol">${__P(PERF_PROTOCOL,http)}</stringProp>
+                  <stringProp name="HTTPSampler.path">/api/ingestion/jobs/${PERF_JOB_ID}</stringProp>
+                  <stringProp name="HTTPSampler.method">GET</stringProp>
+                  <boolProp name="HTTPSampler.follow_redirects">false</boolProp>
+                  <boolProp name="HTTPSampler.auto_redirects">false</boolProp>
+                  <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+                  <stringProp name="HTTPSampler.connect_timeout">5000</stringProp>
+                  <stringProp name="HTTPSampler.response_timeout">30000</stringProp>
+                </HTTPSamplerProxy>
+                <hashTree>
+                  <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="L2 poll requires HTTP 200" enabled="true">
+                    <collectionProp name="Asserion.test_strings"><stringProp name="200">200</stringProp></collectionProp>
+                    <stringProp name="Assertion.test_field">Assertion.response_code</stringProp>
+                    <boolProp name="Assertion.assume_success">false</boolProp>
+                    <intProp name="Assertion.test_type">8</intProp>
+                  </ResponseAssertion>
+                  <hashTree/>
+                  <JSONPostProcessor guiclass="JSONPostProcessorGui" testclass="JSONPostProcessor" testname="Extract transient job state" enabled="true">
+                    <stringProp name="JSONPostProcessor.referenceNames">PERF_JOB_STATE</stringProp>
+                    <stringProp name="JSONPostProcessor.jsonPathExprs">$.data.state</stringProp>
+                    <stringProp name="JSONPostProcessor.match_numbers">1</stringProp>
+                    <stringProp name="JSONPostProcessor.defaultValues">__MISSING__</stringProp>
+                  </JSONPostProcessor>
+                  <hashTree/>
+                  <JSR223PostProcessor guiclass="TestBeanGUI" testclass="JSR223PostProcessor" testname="Increment bounded poll count" enabled="true">
+                    <stringProp name="scriptLanguage">groovy</stringProp>
+                    <boolProp name="cacheKey">true</boolProp>
+                    <stringProp name="script">vars.put('PERF_POLL_COUNT', Integer.toString((vars.get('PERF_POLL_COUNT') as int) + 1))</stringProp>
+                  </JSR223PostProcessor>
+                  <hashTree/>
+                  <JSR223PostProcessor guiclass="TestBeanGUI" testclass="JSR223PostProcessor" testname="L2-ingest-poll stop immediately on HTTP 429" enabled="true">
+                    <stringProp name="scriptLanguage">groovy</stringProp>
+                    <boolProp name="cacheKey">true</boolProp>
+                    <stringProp name="script">if (prev != null &amp;&amp; prev.getResponseCode() == '429') {
+    props.put('PERF_STOP_REASON', 'HTTP_429')
+    prev.setSuccessful(false)
+    prev.setStopTestNow(true)
+}</stringProp>
+                  </JSR223PostProcessor>
+                  <hashTree/>
+                </hashTree>
+              </hashTree>
+              <JSR223Sampler guiclass="TestBeanGUI" testclass="JSR223Sampler" testname="L2-terminal-check" enabled="true">
+                <stringProp name="scriptLanguage">groovy</stringProp>
+                <boolProp name="cacheKey">true</boolProp>
+                <stringProp name="script">String state = vars.get('PERF_JOB_STATE')
+SampleResult.setResponseData(new byte[0])
+if (state == 'SUCCEEDED') {
+    SampleResult.setSuccessful(true)
+    SampleResult.setResponseCode('200')
+} else {
+    SampleResult.setSuccessful(false)
+    SampleResult.setResponseCode('599')
+    SampleResult.setResponseMessage('ingest did not reach SUCCEEDED')
+}</stringProp>
+              </JSR223Sampler>
+              <hashTree/>
+            </hashTree>
+          </hashTree>
+          <IfController guiclass="IfControllerPanel" testclass="IfController" testname="L3 branch" enabled="true">
+            <stringProp name="IfController.condition">${__groovy(props.get('PERF_LAYER'\,'') == 'L3')}</stringProp>
+            <boolProp name="IfController.evaluateAll">false</boolProp>
+            <boolProp name="IfController.useExpression">true</boolProp>
+          </IfController>
+          <hashTree>
+            <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="L3-chat" enabled="true">
+              <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+                <collectionProp name="Arguments.arguments">
+                  <elementProp name="" elementType="HTTPArgument">
+                    <boolProp name="HTTPArgument.always_encode">false</boolProp>
+                    <stringProp name="Argument.value">${__groovy(System.getenv('RAG_PERFORMANCE_L3_BODY') ?: '')}</stringProp>
+                    <stringProp name="Argument.metadata">=</stringProp>
+                  </elementProp>
+                </collectionProp>
+              </elementProp>
+              <stringProp name="HTTPSampler.domain">${__P(PERF_HOST,127.0.0.1)}</stringProp>
+              <stringProp name="HTTPSampler.port">${__P(PERF_PORT,8080)}</stringProp>
+              <stringProp name="HTTPSampler.protocol">${__P(PERF_PROTOCOL,http)}</stringProp>
+              <stringProp name="HTTPSampler.contentEncoding">UTF-8</stringProp>
+              <stringProp name="HTTPSampler.path">/api/agent/chat</stringProp>
+              <stringProp name="HTTPSampler.method">POST</stringProp>
+              <boolProp name="HTTPSampler.follow_redirects">false</boolProp>
+              <boolProp name="HTTPSampler.auto_redirects">false</boolProp>
+              <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+              <boolProp name="HTTPSampler.DO_MULTIPART_POST">false</boolProp>
+              <boolProp name="HTTPSampler.postBodyRaw">true</boolProp>
+              <stringProp name="HTTPSampler.connect_timeout">5000</stringProp>
+              <stringProp name="HTTPSampler.response_timeout">120000</stringProp>
+            </HTTPSamplerProxy>
+            <hashTree>
+              <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="L3 requires HTTP 200" enabled="true">
+                <collectionProp name="Asserion.test_strings"><stringProp name="200">200</stringProp></collectionProp>
+                <stringProp name="Assertion.test_field">Assertion.response_code</stringProp>
+                <boolProp name="Assertion.assume_success">false</boolProp>
+                <intProp name="Assertion.test_type">8</intProp>
+              </ResponseAssertion>
+              <hashTree/>
+              <JSONPathAssertion guiclass="JSONPathAssertionGui" testclass="JSONPathAssertion" testname="L3 requires evidence decision ANSWER" enabled="true">
+                <stringProp name="JSON_PATH">$.data.metadata.evidenceDecision.decision</stringProp>
+                <stringProp name="EXPECTED_VALUE">ANSWER</stringProp>
+                <boolProp name="JSONVALIDATION">true</boolProp>
+                <boolProp name="EXPECT_NULL">false</boolProp>
+                <boolProp name="INVERT">false</boolProp>
+                <boolProp name="ISREGEX">false</boolProp>
+              </JSONPathAssertion>
+              <hashTree/>
+              <JSR223PostProcessor guiclass="TestBeanGUI" testclass="JSR223PostProcessor" testname="L3-chat stop immediately on HTTP 429" enabled="true">
+                <stringProp name="scriptLanguage">groovy</stringProp>
+                <boolProp name="cacheKey">true</boolProp>
+                <stringProp name="script">if (prev != null &amp;&amp; prev.getResponseCode() == '429') {
+    props.put('PERF_STOP_REASON', 'HTTP_429')
+    prev.setSuccessful(false)
+    prev.setStopTestNow(true)
+}</stringProp>
+              </JSR223PostProcessor>
+              <hashTree/>
+            </hashTree>
+          </hashTree>
+        </hashTree>
+      </hashTree>
+      <ResultCollector guiclass="SimpleDataWriter" testclass="ResultCollector" testname="Privacy-safe JTL" enabled="true">
+        <boolProp name="ResultCollector.error_logging">false</boolProp>
+        <objProp>
+          <name>saveConfig</name>
+          <value class="SampleSaveConfiguration">
+            <time>true</time>
+            <latency>true</latency>
+            <timestamp>true</timestamp>
+            <success>true</success>
+            <label>true</label>
+            <code>true</code>
+            <message>false</message>
+            <threadName>true</threadName>
+            <dataType>false</dataType>
+            <encoding>false</encoding>
+            <assertions>false</assertions>
+            <subresults>false</subresults>
+            <responseData>false</responseData>
+            <samplerData>false</samplerData>
+            <xml>false</xml>
+            <fieldNames>true</fieldNames>
+            <responseHeaders>false</responseHeaders>
+            <requestHeaders>false</requestHeaders>
+            <responseDataOnError>false</responseDataOnError>
+            <saveAssertionResultsFailureMessage>false</saveAssertionResultsFailureMessage>
+            <bytes>true</bytes>
+            <sentBytes>true</sentBytes>
+            <url>false</url>
+            <threadCounts>true</threadCounts>
+            <idleTime>true</idleTime>
+            <connectTime>true</connectTime>
+          </value>
+        </objProp>
+        <stringProp name="filename">${__P(PERF_JTL,)}</stringProp>
+      </ResultCollector>
+      <hashTree/>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

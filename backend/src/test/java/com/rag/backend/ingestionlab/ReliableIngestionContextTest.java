@@ -1,6 +1,7 @@
 package com.rag.backend.ingestionlab;
 
 import com.rag.backend.agent.retrieval.MilvusKnowledgeRetriever;
+import com.rag.backend.agent.retrieval.diversity.DiversitySelector;
 import com.rag.backend.ingestionlab.artifact.ReplayableChunkStage;
 import com.rag.backend.ingestionlab.artifact.ReplayableParseStage;
 import com.rag.backend.ingestionlab.job.DurableJobWorker;
@@ -12,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 /** 证明第 10 章新增的生产对象能在 Mock/H2 环境完成 Spring 组装。 */
 @SpringBootTest(properties = {
@@ -35,6 +37,7 @@ class ReliableIngestionContextTest {
     @Autowired private VersionedVectorSearch vectorSearch;
     @Autowired private DurableJobWorker durableJobWorker;
     @Autowired private MilvusKnowledgeRetriever retriever;
+    @Autowired private DiversitySelector diversitySelector;
 
     @Test
     void reliableIngestionProductionGraphCanBeCreated() {
@@ -45,5 +48,8 @@ class ReliableIngestionContextTest {
         assertNotNull(vectorSearch);
         assertNotNull(durableJobWorker);
         assertNotNull(retriever);
+        assertNotNull(diversitySelector);
+        assertFalse(diversitySelector.enabled(),
+                "MMR must remain disabled in the default application graph");
     }
 }

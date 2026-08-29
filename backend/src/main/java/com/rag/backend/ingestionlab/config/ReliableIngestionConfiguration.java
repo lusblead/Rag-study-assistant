@@ -16,6 +16,8 @@ import com.rag.backend.ingestionlab.vector.ChunkWriteRepository;
 import com.rag.backend.ingestionlab.vector.ConsistentVectorStore;
 import com.rag.backend.ingestionlab.vector.VectorWriteStage;
 import com.rag.backend.ingestionlab.verify.IndexVerifier;
+import com.rag.backend.observability.trace.TraceCarrier;
+import com.rag.backend.observability.trace.TraceContextService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.context.annotation.Bean;
@@ -76,12 +78,18 @@ public class ReliableIngestionConfiguration {
     }
 
     @Bean(name = "ingestionJobExecutor")
-    public TaskExecutor ingestionJobExecutor() {
+    public TaskExecutor ingestionJobExecutor(TraceContextService traces) {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         executor.setCorePoolSize(2);
         executor.setMaxPoolSize(4);
         executor.setQueueCapacity(100);
         executor.setThreadNamePrefix("reliable-ingest-");
+        executor.setTaskDecorator(task -> {
+            TraceCarrier carrier = traces.currentCarrier().orElse(null);
+            return carrier == null
+                    ? task
+                    : traces.wrap(carrier, "ingestion.executor", task);
+        });
         executor.initialize();
         return executor;
     }
