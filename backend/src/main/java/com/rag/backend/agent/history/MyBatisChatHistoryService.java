@@ -11,6 +11,12 @@ import java.util.List;
 // 使用 MyBatis 持久化和查询聊天历史。
 public class MyBatisChatHistoryService implements ChatHistoryService {
     private final ChatHistoryMapper mapper;
+    private com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setObjectMapper(com.fasterxml.jackson.databind.ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
+    }
 
     public MyBatisChatHistoryService(ChatHistoryMapper mapper) {
         this.mapper = mapper;
@@ -77,14 +83,40 @@ public class MyBatisChatHistoryService implements ChatHistoryService {
     @Override
     @Transactional
     public void deleteSession(Long sessionId) {
-        ensureSessionExists(sessionId);
+        if (mapper.lockSession(sessionId) == null) throw new BizException(404, "会话不存在");
         mapper.deleteMessagesBySessionId(sessionId);
+        mapper.deleteMaterialVersions(sessionId);
+        mapper.deleteMaterialScope(sessionId);
         mapper.deleteSession(sessionId);
     }
 
     @Override
     @Transactional
+    public void appendTurn(Long sessionId, String question, String answer,
+            java.util.List<com.rag.backend.agent.retrieval.RetrievedChunk> references,
+            com.rag.backend.agent.model.RagChatMetadata metadata) {
+        appendMessage(sessionId, ChatMessage.ROLE_USER, question);
+        ChatMessage message = new ChatMessage();
+        message.setSessionId(sessionId);
+        message.setRole(ChatMessage.ROLE_ASSISTANT);
+        message.setContent(answer);
+        try {
+            message.setEvidenceJson(objectMapper.writeValueAsString(
+                    java.util.Map.of("references", references, "metadata", metadata)));
+        } catch (com.fasterxml.jackson.core.JsonProcessingException error) {
+            throw new IllegalStateException("Cannot persist answer evidence", error);
+        }
+        mapper.insertMessage(message);
+        mapper.touchSession(sessionId);
+    }
+
+    @Override
+    @Transactional
     public void deleteByCourseId(Long courseId) {
+        for (ChatSession session : mapper.selectSessionsByCourseId(courseId).stream()
+                .sorted(java.util.Comparator.comparing(ChatSession::getId)).toList()) {
+            deleteSession(session.getId());
+        }
         mapper.deleteMessagesByCourseId(courseId);
         mapper.deleteSessionsByCourseId(courseId);
     }

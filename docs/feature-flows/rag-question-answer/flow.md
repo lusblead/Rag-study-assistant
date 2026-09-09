@@ -8,7 +8,7 @@ status: "implemented"
 
 ## Purpose
 
-说明当前根源码中的同步与 SSE 课程问答如何读取有限历史、只检索 ACTIVE 文档版本、
+说明当前根源码中的同步与 SSE 课程问答如何读取有限历史、首次绑定 ACTIVE、后续复用仍可读的会话版本、
 通过统一 CandidateSource 边界执行 Dense/Lexical 召回、RRF 与可配置 Rerank，并在生成前
 执行 `ANSWER / CLARIFY / REFUSE` Evidence Sufficiency 决策。只有 `ANSWER` 会构造请求级
 `CitationCatalog`、渲染 Prompt 并调用 OpenAI-compatible 模型；生成后 Grounding 开启时，
@@ -17,7 +17,7 @@ status: "implemented"
 metadata，并保存本轮用户与助手消息。
 
 本契约同时冻结两个持久化限制：模型或准备阶段失败时不会追加本轮成功消息，但首次请求可能
-已经创建空会话；两次消息追加各自提交，不保证消息对跨调用原子落库。Step 2.2 已把现有线上
+已经创建空会话；生产会话路径在版本资格复核的同一短事务内提交消息对与引用。Step 2.2 已把现有线上
 Dense 路径等价迁移到 CandidateSource，
 并提供独立 MySQL LexicalCandidateSource 与双源 Collector。Step 2.3 已接入默认自动启用的
 Hybrid 双源收集与 RRF，并保留显式 `rag.hybrid.enabled=false` 的 Dense-only 紧急回退：双路都有非空、正权重结果
@@ -71,9 +71,9 @@ Milvus、Embedding、LLM、进程重启和生产流量需要按
   都作为内部契约失败传播；
   `CLARIFY / REFUSE` 都清空对外 references，并由 `EvidenceDecisionRenderer` 生成固定本地文本。
 - 同步/SSE 一致性：同步 JSON 和 SSE 都返回 `RagChatMetadata`。SSE 顺序为 session、references、
-  metadata、一个或多个 delta、done；本地决策使用单元素 Flux，不调用 ChatClient。
-- 历史语义：同步成功后立即保存本轮 user/assistant；SSE 只有响应 Flux 正常 complete 后保存。
-  该规则同时适用于模型答案与本地 CLARIFY/REFUSE。
+  metadata、一个完整答案 delta、done；本地决策使用单元素 Flux，不调用 ChatClient。
+- 历史语义：生产同步及 SSE 都在完整候选形成后复核资料资格并原子保存 user/assistant 与引用。
+  SSE 保存后才输出答案。提交前取消或上游失败不保存；提交后的网络投递失败不能回滚历史。
 - 错误边界：检索、Rerank 或 Policy 技术异常直接传播到既有同步/SSE 错误出口，不会被伪装成
   语义 REFUSE，也不会追加本轮成功消息。
 - 配置边界：Evidence Decision 的各 score threshold 按 remote-rerank、local-rerank、fusion、
@@ -132,7 +132,8 @@ Milvus、Embedding、LLM、进程重启和生产流量需要按
   取消、Emitter error 或 timeout 会 dispose 活跃订阅，取消继续传到 provider
   `CompletableFuture.cancel(true)`，已收到 headers 时关闭响应 `Stream`；done/error 投递失败发生在
   上游终止后，只记录 `send_failed`，不伪造一次额外 Provider 取消。
-- 隐私与基数：可投递的 SSE 错误事件只使用 `CHAT_STREAM_FAILED` 与通用消息；Trace 只记录异常类型。
+- 隐私与基数：普通 SSE 错误使用 `CHAT_STREAM_FAILED`；资料错误使用固定
+  `MATERIAL_SCOPE_UNAVAILABLE`、原因枚举和稳定提示；Trace 只记录异常类型。
   日志、span、event 不记录 question、历史、Prompt、Chunk/引用正文、模型 token、API Key、完整
   远端响应、carrier 原值或 baggage；高基数 ID 不得成为 Meter tag。
 
@@ -290,9 +291,9 @@ flowchart TD
     A1 --> D2{"D2 历史中是否有用户消息"}
     D2 -->|否| A2["A2 仅用当前问题构造检索 query"]
     D2 -->|是| A3["A3 拼接历史用户消息与当前问题"]
-    A2 --> A4["A4 一次解析不可变 ACTIVE RetrievalScope"]
+    A2 --> A4["A4 服务端绑定或复用会话资料范围"]
     A3 --> A4
-    A4 --> D8{"D8 scope 是否包含 ACTIVE version"}
+    A4 --> D8{"D8 已确认 scope 是否包含资料版本"}
     D8 -->|否| A12["A12 返回合法空检索结果"]
     D8 -->|是| D9{"D9 是否显式关闭 Hybrid 回退"}
     D9 -->|是 enabled=false| A13["A13 DenseCandidateSource 向量召回、阈值过滤与 MySQL 回表复核"]
@@ -358,15 +359,15 @@ flowchart TD
     D23 -->|否| A36
     A36 --> D24{"D24 严格结果交付模式"}
     D24 -->|同步| T1
-    D24 -->|SSE| A37["A37 发送最终 metadata 与一个已验证 delta"]
+    D24 -->|SSE| A37["A37 发送最终 metadata；准备完整候选，尚不发送答案"]
     A37 --> T1
     D4 -->|同步| A7["A7 OpenAiCompatibleChatClient.call；单次请求"]
     D4 -->|SSE| A8["A8 返回模型 Flux；发送 session、references、metadata"]
     A7 --> D5{"D5 同步模型调用是否成功"}
     D5 -->|否| X2(["X2 准备或同步模型错误；不追加本轮成功消息"])
-    D5 -->|是| T1["T1 追加本轮 user 消息"]
+    D5 -->|是| T1["T1 复核资料资格；事务内追加 user，失效则整体失败"]
     A8 --> A9["A9 订阅 OpenAiCompatibleChatClient.stream；单次请求"]
-    A9 --> A10["A10 每个模型片段发送 delta 并累积答案"]
+    A9 --> A10["A10 缓冲模型片段，不提前输出答案"]
     A10 --> D6{"D6 模型流是否正常完成"}
     D6 -->|否| X3(["X3 尝试发送 error；失败记 send_failed；无 done、无本轮成功消息"])
     D6 -->|是| T1
@@ -374,16 +375,16 @@ flowchart TD
     A27 --> D19
     D19 -->|同步| T1
     D19 -->|SSE| A28["A28 返回单元素本地 Flux；发送 session、空 references、metadata"]
-    A28 --> A29["A29 发送一个本地 delta 并正常 complete"]
+    A28 --> A29["A29 准备完整本地响应，尚不发送答案"]
     A29 --> T1
-    T1 --> T2["T2 追加本轮 assistant 消息"]
+    T1 --> T2["T2 同事务追加 assistant 与引用并提交；失败整体回滚"]
     T2 --> D7{"D7 响应模式"}
     D7 -->|同步| X4(["X4 返回 answer、references、metadata 与 sessionId"])
-    D7 -->|SSE| A11["A11 发送 done"]
+    D7 -->|SSE| A11["A11 发送完整答案 delta；完成后发送 done"]
     A11 --> X5(["X5 SSE 正常结束"])
 
     G1[["G1 请求校验先于业务副作用"]] -.-> D1
-    G2[["G2 单次 scope 解析与 ACTIVE 版本双重过滤"]] -.-> A4
+    G2[["G2 会话固定范围与版本双重核验"]] -.-> A4
     G2 -.-> A13
     G2 -.-> A15
     G5[["G5 Hybrid 默认开启；显式 false 可回退且单路不比较跨源 raw score"]] -.-> D9
@@ -445,7 +446,7 @@ sequenceDiagram
     participant Chat as RagChatService
     participant History as ChatHistoryService
     participant Retriever as MilvusKnowledgeRetriever
-    participant Active as ActiveVersionResolver
+    participant Materials as SessionMaterialService
     participant Dense as DenseCandidateSource
     participant Lexical as MySqlLexicalCandidateSource
     participant Collector as DualCandidateSourceCollector
@@ -483,12 +484,13 @@ sequenceDiagram
     Chat->>History: recentMessages(sessionId, historyLimit)
     History-->>Chat: 最近消息
     Chat->>Chat: retrievalQuery(question, history)
-    Chat->>Retriever: retrieveWithResult(courseId, query, topK)
-    Retriever->>Active: forCourse(courseId)
-    Active-->>Retriever: activeVersionIds
-    alt 没有 ACTIVE 版本
+    Chat->>Materials: acquire(sessionId, courseId)
+    Materials-->>Chat: 已绑定可读清单及持久取数保护
+    Chat->>Retriever: retrieveInScope(read.scope(), query, topK)
+    Note over Chat,Materials: 取数结束复核并 finally 释放；取数失败不调用模型
+    alt 固定范围为空
         Retriever->>RetrievalResult: empty + NO_ACTIVE_VERSION
-    else 存在 ACTIVE 版本
+    else 固定范围存在可读版本
         Retriever->>Retriever: create immutable RetrievalScope once
         alt 显式关闭 Hybrid（Dense-only 紧急回退）
             Retriever->>Dense: retrieve(scope, query, max(candidateK, topK))
@@ -614,15 +616,16 @@ sequenceDiagram
                     end
                 end
                 alt 同步问答
-                    Chat->>History: appendMessage(user, question)
-                    Chat->>History: appendMessage(assistant, final response)
+                    Chat->>Materials: complete：锁定并复核原版资格
+                    Materials->>History: 同事务 appendTurn(user, assistant, references, metadata)
                     Chat-->>API: JSON + final grounding metadata
                     API-->>User: JSON success
                 else SSE 问答
                     Note over Chat,User: 完整校验结束前不发送模型 token
                     Chat-->>API: one verified response Flux + final metadata
-                    API-->>User: session, references, metadata, one delta, done
-                    Chat->>History: append completed user/assistant
+                    API-->>User: session, references, metadata
+                    Chat->>Materials: complete：复核并原子保存消息对及引用
+                    API-->>User: one delta, done
                 end
             else 同步问答（Grounding 关闭或本地决策）
                 alt decision=ANSWER
@@ -639,8 +642,8 @@ sequenceDiagram
                 else decision=CLARIFY 或 REFUSE
                     Chat->>Chat: use local response
                 end
-                Chat->>History: appendMessage(user, question)
-                Chat->>History: appendMessage(assistant, actual response)
+                Chat->>Materials: complete：锁定并复核原版资格
+                Materials->>History: 同事务 appendTurn(user, assistant, references, metadata)
                 Chat-->>API: RagChatResponse(sessionId, answer, references, metadata)
                 API-->>User: JSON success
             else SSE 问答（Grounding 关闭或本地决策）
@@ -653,18 +656,21 @@ sequenceDiagram
                     Chat->>LLM: stream(prompt), request timeout
                     loop 每个模型内容片段
                         LLM-->>Chat: chunk
-                        Chat-->>API: accumulated via doOnNext
-                        API-->>User: event delta
+                        Chat->>Chat: collectList 缓冲，不输出 token
                     end
                 else decision=CLARIFY 或 REFUSE
-                    Chat-->>API: one local response chunk
-                    API-->>User: event delta
+                    Chat->>Chat: 准备完整本地响应
                 end
                 alt Flux 正常 complete
-                    Chat->>History: appendMessage(user, question)
-                    Chat->>History: appendMessage(assistant, actual full response)
-                    Chat-->>API: stream complete
-                    API-->>User: event done
+                    Chat->>Materials: complete：锁定并复核原版资格
+                    alt 资料仍有效且持久化成功
+                        Materials->>History: 同事务 appendTurn(user, assistant, references, metadata)
+                        Chat-->>API: 完整答案 delta 后 stream complete
+                        API-->>User: event delta, done
+                    else 资料已失效或消息保存失败
+                        Chat--xAPI: exception，事务回滚
+                        API-->>User: error，无答案 delta
+                    end
                 else 模型流失败
                     LLM--xChat: stream error
                     Chat--xAPI: subscriber onError
@@ -680,8 +686,7 @@ sequenceDiagram
 
 `Chat turn persistence` 表示当前一轮新增消息的持久化状态，不是数据库中的显式状态列。
 同步模型答案或同步本地决策响应形成完整文本后进入 T1/T2；SSE 则只在模型 Flux 或本地单元素
-Flux 正常 complete 后进入。准备、Policy 或模型失败不进入这两个转换。两个 `appendMessage`
-各自开启事务，因此当前实现不保证消息对跨调用原子提交。
+Flux 正常 complete 后进入。准备、Policy 或模型失败不进入这两个转换。生产路径的 `appendTurn` 在会话版本复核事务内原子提交消息对和引用；T1 是事务内中间状态，失败会回滚，不能单独对外可见。
 
 ```mermaid
 stateDiagram-v2
@@ -722,8 +727,8 @@ stateDiagram-v2
   `calibration-id` 并进入 observed signals。
 - G14：同步 JSON 与 SSE metadata 都携带 decision、reason、policy version、observed signals 和
   脱敏 RetrievalDiagnostics；决策日志只记录低基数状态、计数和来源，不记录问题或证据正文。
-- G15：同步和 SSE 共用同一 `prepare` 决策；本地响应与模型响应都保存实际返回文本。SSE 仍只在
-  正常 complete 后写历史，随后才发送 done。
+- G15：同步和 SSE 共用同一 `prepare` 决策；完整候选通过资料复核后原子保存消息对与引用。
+  SSE 在保存后才发送答案 delta 与 done；提交后投递失败不撤销已保存历史。
 - G16：请求级 `CitationCatalog` 是 Prompt、两层校验、修复和返回 source 顺序的唯一编号来源；
   未知 source ID、重复 Chunk 或空 ANSWER 目录 fail-closed。
 - G17：严格 Grounding 每轮最多两次生成；修复使用同一证据目录，替代回答必须重新执行两层
@@ -747,7 +752,8 @@ stateDiagram-v2
   仓库没有全局 logging pattern 保证所有普通业务日志自动打印 MDC，因此该能力尚未配置或验证。
 - OpenAI-compatible 客户端没有自动重试、退避或熔断；超时后由调用方决定是否重新提交。重复提交会产生新一轮模型调用，系统没有问答幂等键。
 - 如果首次提问在模型前失败，`resolveSession` 可能已创建没有消息的会话；这不是成功问答记录。
-- 如果第一条消息写入成功而第二条写入失败，可能留下仅有 user 的部分持久化状态；当前没有跨两次 append 的补偿或恢复流程。
+- 生产会话路径原子保存消息对和引用，第二条消息或证据序列化失败会整体回滚。
+  未注入 materials 的旧手工测试入口仍分别 append，不代表生产事务保证。
 - 默认启用 Policy 时，正常空检索是 `NO_RETRIEVED_EVIDENCE` 语义 REFUSE：不渲染 Prompt、不调用
   LLM，references 为空。显式设置 `rag.evidence-decision.enabled=false` 只为满足 mustCite 可追溯性的
   非空候选恢复兼容 ANSWER；正常零候选或不可追溯候选仍 REFUSE
@@ -786,3 +792,17 @@ Dev45/Test55、Hybrid/Rerank、Evidence Decision 或 Grounding 的质量收益�
 Step 4.3 已按最终 HTTP/同步准备/异步订阅顺序、独立 root、upstream link、MDC 清理、唯一 SSE
 terminal、投递失败、真实 provider 取消与错误脱敏实现完成 reconcile。确定性故障测试只证明本地
 代码与受控 I/O 边界；真实 Provider、Servlet 客户端断连、外部 Trace 后端和生产流量仍未验证。
+
+## 2026-09 会话资料版本保持
+
+生产聊天由 SessionMaterialService.acquire 建立或复用持久化的文档→版本清单，并登记在途读取；
+MilvusKnowledgeRetriever.retrieveInScope 不再次选最新版。Dense 与 Lexical、重排、引用使用相同范围。
+SUPERSEDED 仅对曾合法绑定且仍有效的会话开放。正文缺失、撤回、过期属于不可降级失败；
+临时单路故障仍可在相同范围内降级。所有成功消息对及 evidence_json 均在最终版本复核事务中提交。
+SSE 无论 Grounding 开关如何，均缓冲完整候选，复核并保存后才发答案 delta；提交前取消或上游
+出错不保存成功历史，提交后网络断开不回滚。旧手工构造且未注入 materials 的测试兼容路径仍
+沿用旧历史/流式语义，不作为本轮生产会话保证的证据。
+空范围保持为空，有更新提示后由用户新建会话；没有版本记录的历史会话要求新建，不静默绑定新版。
+通用 SSE 错误仍脱敏，资料错误额外使用固定 MATERIAL_SCOPE_UNAVAILABLE 与原因枚举。
+版本状态、数据保留、回收、课程删除等待及引用恢复的完整分支与测试由
+[会话资料契约](../rag-session-materials/flow.md) 描述；下面保留的旧手工装配测试只覆盖兼容入口。

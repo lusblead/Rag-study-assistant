@@ -30,7 +30,7 @@
       </template>
     </aside>
 
-    <section class="chat-main">
+    <section :class="['chat-main', { 'has-material-status': materials }]">
       <div class="chat-head">
         <div>
           <p class="eyebrow">RAG 答疑</p>
@@ -42,6 +42,23 @@
         </label>
       </div>
 
+      <aside v-if="materials" class="material-status" aria-live="polite">
+        <p v-if="materials.state === 'UNAVAILABLE'">
+          {{ materials.reason === 'EVIDENCE_MISSING' ? '资料证据不完整，已暂停回答，请联系维护者。' : '本对话资料版本已不可用，请开启新对话继续。' }}
+        </p>
+        <p v-else-if="materials.updateAvailable">资料已有更新，本对话仍使用原版以保持连续性。</p>
+        <p v-else-if="materials.state === 'READY'">本对话已固定资料版本。</p>
+        <p v-else>首次提问时固定当前可用资料；后续更新不会自动切换依据。</p>
+        <details v-if="materials.versions.length">
+          <summary>查看本对话使用的资料</summary>
+          <p v-for="version in materials.versions" :key="version.documentId">
+            {{ version.documentName }} · 第 {{ version.versionNo }} 版（记录 {{ version.documentVersionId }}）
+          </p>
+        </details>
+        <button v-if="materials.updateAvailable || materials.state === 'UNAVAILABLE'" :disabled="busy" @click="newSession">
+          使用当前可用资料开启新对话
+        </button>
+      </aside>
       <div ref="messageListRef" class="message-list">
         <EmptyState v-if="!course" title="请选择课程后开始对话" />
         <EmptyState
@@ -83,19 +100,20 @@
               </span>
             </div>
           </details>
-          <ReferencesList v-if="message.references?.length" :references="message.references" />
+          <ReferencesList v-if="message.references?.length" :references="message.references"
+            :session-id="activeSessionId" :course-id="course?.id" />
         </article>
       </div>
 
       <form class="chat-form" @submit.prevent="submitQuestion">
         <textarea
           v-model="question"
-          :disabled="!course || busy"
+          :disabled="!course || busy || materials?.state === 'UNAVAILABLE'"
           placeholder="输入课程问题，答案会基于已入库文档生成"
           rows="3"
           @keydown.enter.exact.prevent="submitQuestion"
         />
-        <button :disabled="!course || busy || !question.trim()" type="submit">
+        <button :disabled="!course || busy || !question.trim() || materials?.state === 'UNAVAILABLE'" type="submit">
           {{ busy ? "生成中" : "发送" }}
         </button>
       </form>
@@ -110,7 +128,7 @@ import { api, streamChat } from "../api";
 import EmptyState from "../components/EmptyState.vue";
 import ReferencesList from "../components/ReferencesList.vue";
 import { renderMarkdown } from "../markdown";
-import type { ChatSession, Course, RagChatMetadata, RetrievedChunk } from "../types";
+import type { ChatSession, Course, RagChatMetadata, RetrievedChunk, MaterialStatus } from "../types";
 
 type UiMessage = {
   id: string;
@@ -130,6 +148,7 @@ const emit = defineEmits<{
 }>();
 
 const sessions = ref<ChatSession[]>([]);
+const materials = ref<MaterialStatus | null>(null);
 const activeSessionId = ref<number | null>(null);
 const messages = ref<UiMessage[]>([]);
 const question = ref("");
@@ -142,6 +161,7 @@ const messageListRef = ref<HTMLElement | null>(null);
 watch(
   () => props.course?.id,
   () => {
+    materials.value = null;
     activeSessionId.value = null;
     messages.value = [];
     latestReferences.value = [];
@@ -163,12 +183,15 @@ async function loadSessions() {
 }
 
 function newSession() {
+  if (busy.value) return;
+  materials.value = null;
   activeSessionId.value = null;
   messages.value = [];
   latestReferences.value = [];
 }
 
 async function openSession(sessionId: number) {
+  if (busy.value) return;
   activeSessionId.value = sessionId;
   latestReferences.value = [];
   try {
@@ -177,8 +200,10 @@ async function openSession(sessionId: number) {
       id: String(message.id),
       role: message.role === "assistant" ? "assistant" : "user",
       content: message.content,
-      createdAt: message.createdAt
+      createdAt: message.createdAt,
+      ...restoreEvidence(message.evidenceJson)
     }));
+    await refreshMaterials();
   } catch (error) {
     emit("notify", "error", error instanceof Error ? error.message : "消息加载失败");
   }
@@ -200,7 +225,7 @@ async function deleteSession(sessionId: number) {
 
 async function submitQuestion() {
   const text = question.value.trim();
-  if (!props.course || !text) return;
+  if (!props.course || !text || busy.value || materials.value?.state === 'UNAVAILABLE') return;
 
   const assistantId = `assistant-${Date.now()}`;
   busy.value = true;
@@ -214,6 +239,9 @@ async function submitQuestion() {
   void scrollMessagesToBottom();
 
   try {
+    if (activeSessionId.value === null) {
+      activeSessionId.value = (await api.createChatSession(props.course.id)).sessionId;
+    }
     if (streaming.value) {
       let nextSessionId = activeSessionId.value;
       await streamChat(
@@ -228,6 +256,7 @@ async function submitQuestion() {
             patchAssistant(assistantId, { references });
           },
           onMetadata: (metadata) => {
+            materials.value = metadata.materials || null;
             patchAssistant(assistantId, { metadata });
           },
           onDelta: (delta) => {
@@ -246,6 +275,7 @@ async function submitQuestion() {
       });
       activeSessionId.value = response.sessionId;
       latestReferences.value = response.references || [];
+      materials.value = response.metadata?.materials || null;
       patchAssistant(assistantId, {
         content: response.answer,
         references: response.references || [],
@@ -255,11 +285,29 @@ async function submitQuestion() {
     await loadSessions();
   } catch (error) {
     const message = error instanceof Error ? error.message : "回答失败";
-    patchAssistant(assistantId, { content: message });
+    patchAssistant(assistantId, { content: message, references: [], metadata: undefined });
     emit("notify", "error", message);
   } finally {
+    await refreshMaterials();
     busy.value = false;
   }
+}
+
+async function refreshMaterials() {
+  const sessionId = activeSessionId.value;
+  const courseId = props.course?.id;
+  if (!sessionId || !courseId) return;
+  try {
+    const status = await api.sessionMaterials(sessionId, courseId);
+    if (activeSessionId.value === sessionId && props.course?.id === courseId) materials.value = status;
+  } catch (error) {
+    emit("notify", "error", error instanceof Error ? error.message : "资料状态检查失败，请稍后重试");
+  }
+}
+
+function restoreEvidence(value?: string | null): Partial<UiMessage> {
+  if (!value) return {};
+  try { return JSON.parse(value); } catch { return {}; }
 }
 
 function patchAssistant(id: string, patch: Partial<UiMessage>) {
@@ -288,3 +336,10 @@ function formatDate(value?: string) {
   }).format(date);
 }
 </script>
+
+<style scoped>
+.chat-main.has-material-status { grid-template-rows: auto auto minmax(0, 1fr) auto; }
+.material-status { padding: 12px 20px; background: #f3f5ed; border-bottom: 1px solid #d8ded0; font-size: 14px; }
+.material-status p { margin: 5px 0; }
+.material-status button { margin-top: 8px; }
+</style>

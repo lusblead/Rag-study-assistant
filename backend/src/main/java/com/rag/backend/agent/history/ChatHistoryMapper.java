@@ -14,13 +14,22 @@ public interface ChatHistoryMapper {
     @Select("SELECT * FROM chat_sessions WHERE id = #{id}")
     ChatSession selectSessionById(Long id);
 
+    @Select("SELECT * FROM chat_sessions WHERE id=#{id} FOR UPDATE")
+    ChatSession lockSession(Long id);
+
+    @Delete("DELETE FROM chat_material_versions WHERE session_id=#{id}")
+    int deleteMaterialVersions(Long id);
+
+    @Delete("DELETE FROM chat_material_scopes WHERE session_id=#{id}")
+    int deleteMaterialScope(Long id);
+
     @Select("SELECT * FROM chat_sessions WHERE course_id = #{courseId} ORDER BY updated_at DESC")
     List<ChatSession> selectSessionsByCourseId(Long courseId);
 
     @Update("UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = #{id}")
     int touchSession(Long id);
 
-    @Insert("INSERT INTO chat_messages (session_id, role, content) VALUES (#{sessionId}, #{role}, #{content})")
+    @Insert("INSERT INTO chat_messages (session_id, role, content, evidence_json) VALUES (#{sessionId}, #{role}, #{content}, #{evidenceJson})")
     @Options(useGeneratedKeys = true, keyProperty = "id")
     int insertMessage(ChatMessage message);
 

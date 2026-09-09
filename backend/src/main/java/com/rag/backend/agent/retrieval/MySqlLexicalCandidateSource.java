@@ -80,6 +80,11 @@ public class MySqlLexicalCandidateSource implements CandidateSource {
                         "Lexical mapper returned an invalid candidate row");
             }
             double rawScore = row.getRawScore();
+            if (scope.sessionBound() && (row.getDocumentVersionId() == null
+                    || !scope.activeVersionIds().contains(row.getDocumentVersionId())
+                    || row.getContent() == null || row.getContent().isBlank())) {
+                throw new com.rag.backend.agent.materials.MaterialScopeException("EVIDENCE_MISSING");
+            }
             if (rawScore <= 0.0 || rawScore < scoreThreshold) {
                 continue;
             }
@@ -90,7 +95,7 @@ public class MySqlLexicalCandidateSource implements CandidateSource {
                     row.getTitle(),
                     row.getContent(),
                     row.getSourcePage(),
-                    rawScore).withLexicalScore(rawScore);
+                    rawScore).withDocumentVersionId(row.getDocumentVersionId()).withLexicalScore(rawScore);
             candidates.add(new RetrievalCandidate(
                     chunk, rawScore, candidates.size()));
         }

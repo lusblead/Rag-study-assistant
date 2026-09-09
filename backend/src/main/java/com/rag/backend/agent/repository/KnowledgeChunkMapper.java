@@ -24,6 +24,7 @@ public interface KnowledgeChunkMapper {
     @Select("""
             <script>
             SELECT kc.id AS chunk_id,
+                   kc.document_version_id,
                    kc.document_id,
                    COALESCE(NULLIF(d.filename, ''), kc.title) AS document_name,
                    kc.title,
@@ -49,6 +50,7 @@ public interface KnowledgeChunkMapper {
             """)
     @Results(id = "lexicalCandidateRow", value = {
             @Result(property = "chunkId", column = "chunk_id"),
+            @Result(property = "documentVersionId", column = "document_version_id"),
             @Result(property = "documentId", column = "document_id"),
             @Result(property = "documentName", column = "document_name"),
             @Result(property = "title", column = "title"),
@@ -66,6 +68,7 @@ public interface KnowledgeChunkMapper {
     @Select("""
             <script>
             SELECT kc.id AS chunk_id,
+                   kc.document_version_id,
                    kc.document_id,
                    COALESCE(NULLIF(d.filename, ''), kc.title) AS document_name,
                    kc.title,

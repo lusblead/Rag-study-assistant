@@ -2,6 +2,9 @@ package com.rag.backend.agent.retrieval;
 
 /** MyBatis FULLTEXT 查询返回的轻量候选行。 */
 public class LexicalCandidateRow {
+    private Long documentVersionId;
+    public Long getDocumentVersionId() { return documentVersionId; }
+    public void setDocumentVersionId(Long value) { documentVersionId = value; }
     private Long chunkId;
     private Long documentId;
     private String documentName;

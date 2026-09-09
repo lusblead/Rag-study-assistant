@@ -15,9 +15,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.List;
 
 @Service
@@ -32,6 +29,12 @@ public class CourseServiceImpl implements CourseService {
     private final ChatHistoryService chatHistoryService;
     private final PaperMapper paperMapper;
     private final PaperQuestionMapper paperQuestionMapper;
+    private com.rag.backend.ingestionlab.delete.DeleteRequestService deleteRequests;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setDeleteRequests(com.rag.backend.ingestionlab.delete.DeleteRequestService deleteRequests) {
+        this.deleteRequests = deleteRequests;
+    }
 
     public CourseServiceImpl(CourseMapper courseMapper,
                              DocumentMapper documentMapper,
@@ -76,7 +79,7 @@ public class CourseServiceImpl implements CourseService {
     }
 
     @Override
-    @Transactional
+    @Transactional(noRollbackFor = CourseDeletionPendingException.class)
     public void delete(Long id) {
         Course existing = courseMapper.selectById(id);
         if (existing == null) {
@@ -84,11 +87,10 @@ public class CourseServiceImpl implements CourseService {
         }
 
         List<CourseDocument> documents = documentMapper.selectListByCourseId(id);
-        for (CourseDocument document : documents) {
-            cleanupService.cleanupDocument(document.getId());
-            deleteUploadedFile(document);
+        if (!documents.isEmpty()) {
+            for (CourseDocument document : documents) deleteRequests.request(document.getId());
+            throw new CourseDeletionPendingException();
         }
-
         cleanupService.cleanupCourse(id);
         chatHistoryService.deleteByCourseId(id);
         practiceMapper.deleteByCourseId(id);
@@ -102,14 +104,9 @@ public class CourseServiceImpl implements CourseService {
         courseMapper.deleteById(id);
     }
 
-    private void deleteUploadedFile(CourseDocument document) {
-        if (document.getFilePath() == null || document.getFilePath().isBlank()) {
-            return;
-        }
-        try {
-            Files.deleteIfExists(Path.of(document.getFilePath()));
-        } catch (IOException e) {
-            throw new BizException(500, "删除课程文件失败: " + document.getFilePath());
+    public static class CourseDeletionPendingException extends BizException {
+        public CourseDeletionPendingException() {
+            super(409, "课程资料已进入安全删除队列，请待文档清理完成后再次删除课程。");
         }
     }
 }

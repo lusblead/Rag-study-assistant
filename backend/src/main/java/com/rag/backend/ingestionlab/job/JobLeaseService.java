@@ -74,6 +74,12 @@ public class JobLeaseService {
         finish(lease, "SUCCEEDED", null, null, now());
     }
 
+    public void deferDeleteForReaders(Lease lease) {
+        LocalDateTime now = now();
+        if (mapper.deferDeleteForReaders(lease.jobId(), lease.owner(), lease.stateVersion(),
+                now, now.plusSeconds(30)) != 1) throw new LeaseLostException(lease.jobId());
+    }
+
     // 完成和重试都走 owner CAS，旧 Worker 不可覆盖。
     private void finish(Lease lease, String state, String errorCode,
                         String detail, LocalDateTime nextRunAt) {

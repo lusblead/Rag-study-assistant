@@ -1,5 +1,7 @@
 package com.rag.backend.agent.retrieval;
 
+import com.rag.backend.agent.materials.MaterialScopeException;
+
 import java.net.SocketTimeoutException;
 import java.sql.SQLTimeoutException;
 import java.util.ArrayList;
@@ -66,6 +68,8 @@ public class DualCandidateSourceCollector {
                 diagnostics.add(new CandidateSourceDiagnostic(
                         source.type(), null, null,
                         elapsed(started), batch.candidates().size()));
+            } catch (MaterialScopeException failure) {
+                throw failure;
             } catch (RuntimeException failure) {
                 diagnostics.add(new CandidateSourceDiagnostic(
                         source.type(), source.type(), classify(failure),

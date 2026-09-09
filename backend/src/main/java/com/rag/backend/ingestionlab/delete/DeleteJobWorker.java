@@ -48,6 +48,8 @@ public class DeleteJobWorker {
             saga.execute(job.getDocumentId());
             session.renew();
             leases.succeed(session.current());
+        } catch (com.rag.backend.agent.materials.MaterialReclamationService.ReadersActiveException waiting) {
+            leases.deferDeleteForReaders(session.current());
         } catch (JobLeaseService.LeaseLostException ignored) {
             // 新 owner 会从仍然存在的墓碑继续清理。
         } catch (IllegalArgumentException error) {

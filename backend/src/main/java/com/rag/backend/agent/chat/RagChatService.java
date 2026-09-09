@@ -14,6 +14,8 @@ import com.rag.backend.agent.grounding.GroundedAnswerGenerator;
 import com.rag.backend.agent.grounding.GroundedAnswerResult;
 import com.rag.backend.agent.grounding.GroundingDiagnostics;
 import com.rag.backend.agent.history.ChatMessage;
+import com.rag.backend.agent.materials.SessionMaterialService;
+import com.rag.backend.agent.materials.MaterialStatus;
 import com.rag.backend.agent.history.ChatHistoryService;
 import com.rag.backend.agent.llm.ChatClient;
 import com.rag.backend.agent.model.RagChatMetadata;
@@ -56,6 +58,12 @@ public class RagChatService {
     private final EvidenceDecisionRenderer evidenceDecisionRenderer;
     private final GroundedAnswerGenerator groundedAnswerGenerator;
     private final TraceContextService traces;
+    private SessionMaterialService materials;
+
+    @Autowired
+    public void setMaterials(SessionMaterialService materials) {
+        this.materials = Objects.requireNonNull(materials);
+    }
 
     @Autowired
     public RagChatService(KnowledgeRetriever knowledgeRetriever,
@@ -176,7 +184,7 @@ public class RagChatService {
         } else {
             answer = evidenceDecisionRenderer.render(turn.decision());
         }
-        appendCompletedTurn(turn.sessionId(), question, answer);
+        completeTurn(courseId, turn, question, answer, metadata);
         return new RagChatResponse(
                 turn.sessionId(), answer, turn.usableChunks(), metadata);
     }
@@ -242,6 +250,17 @@ public class RagChatService {
             source = Flux.just(evidenceDecisionRenderer.render(
                     turn.decision()));
         }
+        if (materials != null) {
+            RagChatMetadata finalMetadata = metadata;
+            TraceCarrier completionCarrier = traces.capture(null);
+            // No unvalidated token can escape after withdrawal/retention expiry during generation.
+            Flux<String> validated = source.collectList().flatMapMany(parts -> {
+                String completeAnswer = String.join("", parts);
+                completeTurn(courseId, turn, question, completeAnswer, finalMetadata, completionCarrier);
+                return Flux.just(completeAnswer);
+            });
+            return new RagChatStreamResponse(turn.sessionId(), turn.usableChunks(), metadata, validated);
+        }
         StringBuilder answer = new StringBuilder();
         TraceCarrier completionCarrier = traces.capture(null);
         Flux<String> stream = source
@@ -273,23 +292,35 @@ public class RagChatService {
                 sessionId, courseId, question);
         List<ChatMessage> history = chatHistoryService.recentMessages(
                 effectiveSessionId, historyLimit);
-        RetrievalExecutionResult retrieval = traces.inSpan(
+        MaterialStatus materialStatus = null;
+        RetrievalExecutionResult retrieval;
+        if (materials != null) {
+            try (SessionMaterialService.ReadHandle read = materials.acquire(effectiveSessionId, courseId)) {
+                materialStatus = read.status();
+                retrieval = traces.inSpan("chat.retrieval", () -> knowledgeRetriever.retrieveInScope(
+                        read.scope(), retrievalQuery(question, history), topK));
+                read.validate();
+            }
+        } else {
+            retrieval = traces.inSpan(
                 "chat.retrieval", () -> knowledgeRetriever.retrieveWithResult(
                         courseId,
                         retrievalQuery(question, history),
                         topK));
+        }
+        RetrievalExecutionResult frozenRetrieval = retrieval;
         EvidenceDecisionResult decision = traces.inSpan(
                 "chat.policy", () -> evidenceDecisionPolicy.decide(
                         new EvidenceDecisionInput(
                         question,
                         history,
-                        retrieval.chunks(),
+                        frozenRetrieval.chunks(),
                         EvidenceConstraints.courseChat(),
-                        retrieval.diagnostics())));
+                        frozenRetrieval.diagnostics())));
         List<RetrievedChunk> usableChunks = usableChunks(
                 retrieval.chunks(), decision);
         RagChatMetadata metadata = new RagChatMetadata(
-                decision, retrieval.diagnostics());
+                decision, retrieval.diagnostics()).withMaterials(materialStatus);
         logDecision(decision, retrieval);
         return new PreparedTurn(
                 effectiveSessionId,
@@ -324,6 +355,29 @@ public class RagChatService {
                     "Evidence policy returned IDs outside retrieved evidence");
         }
         return usable;
+    }
+
+    private void completeTurn(Long courseId, PreparedTurn turn, String question, String answer,
+            RagChatMetadata metadata) {
+        completeTurn(courseId, turn, question, answer, metadata, traces.capture(null));
+    }
+
+    private void completeTurn(Long courseId, PreparedTurn turn, String question, String answer,
+            RagChatMetadata metadata, TraceCarrier carrier) {
+        if (materials == null) {
+            appendCompletedTurn(turn.sessionId(), question, answer);
+            return;
+        }
+        try (TraceSpan span = traces.continueOrStart(carrier, "chat.history.write", carrier.correlationId())) {
+            try {
+                materials.complete(turn.sessionId(), courseId, () ->
+                        chatHistoryService.appendTurn(turn.sessionId(), question, answer, turn.usableChunks(), metadata));
+                span.result("success");
+            } catch (RuntimeException | Error error) {
+                span.error(error);
+                throw error;
+            }
+        }
     }
 
     private void appendCompletedTurn(

@@ -14,6 +14,13 @@ public interface ChatHistoryService {
 
     void appendMessage(Long sessionId, String role, String content);
 
+    default void appendTurn(Long sessionId, String question, String answer,
+            java.util.List<com.rag.backend.agent.retrieval.RetrievedChunk> references,
+            com.rag.backend.agent.model.RagChatMetadata metadata) {
+        appendMessage(sessionId, ChatMessage.ROLE_USER, question);
+        appendMessage(sessionId, ChatMessage.ROLE_ASSISTANT, answer);
+    }
+
     void deleteSession(Long sessionId);
 
     void deleteByCourseId(Long courseId);

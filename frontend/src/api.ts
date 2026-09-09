@@ -3,6 +3,7 @@ import type {
   ApiResult,
   ChatMessage,
   ChatSession,
+  MaterialStatus,
   Course,
   CourseDocument,
   DeleteSubmission,
@@ -234,6 +235,12 @@ export const api = {
   chat: (payload: { courseId: number; sessionId?: number | null; question: string }) =>
     request<RagChatResponse>("/api/agent/chat", { method: "POST", body: JSON.stringify(payload) }),
   listSessions: (courseId: number) => request<ChatSession[]>(`/api/agent/chat/sessions${query({ courseId })}`),
+  createChatSession: (courseId: number) => request<{ sessionId: number }>(
+    `/api/agent/chat/sessions${query({ courseId })}`, { method: "POST" }),
+  sessionMaterials: (sessionId: number, courseId: number) => request<MaterialStatus>(
+    `/api/agent/chat/sessions/${sessionId}/materials${query({ courseId })}`),
+  sessionReference: (sessionId: number, courseId: number, chunkId: number, documentVersionId: number) =>
+    request<{ content: string }>(`/api/agent/chat/sessions/${sessionId}/references/${chunkId}${query({ courseId, documentVersionId })}`),
   listMessages: (sessionId: number) =>
     request<ChatMessage[]>(`/api/agent/chat/sessions/${sessionId}/messages`),
   deleteSession: (sessionId: number) =>
@@ -382,7 +389,7 @@ function dispatchSseBlock(block: string, handlers: StreamHandlers) {
   if (eventName === "error") {
     const parsed = parseJson<{ message: string }>(data);
     handlers.onError?.(parsed?.message || data || "流式响应失败");
-    return;
+    throw new Error(parsed?.message || data || "流式响应失败");
   }
 
   if (eventName === "done") {

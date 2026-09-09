@@ -89,21 +89,21 @@ nodes:
 
   A4:
     kind: action
-    description: 每次问答只解析一次不可变 ACTIVE-version RetrievalScope
+    description: 服务端持久化或复用会话版本范围；非会话入口保留当前活动版本语义
     code:
       - path: backend/src/main/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetriever.java
-        symbol: retrieveWithResult
+        symbol: retrieveInScope
       - path: backend/src/main/java/com/rag/backend/agent/retrieval/RetrievalScope.java
         symbol: RetrievalScope
-      - path: backend/src/main/java/com/rag/backend/ingestionlab/retrieval/ActiveVersionResolver.java
-        symbol: forCourse
+      - path: backend/src/main/java/com/rag/backend/agent/materials/SessionMaterialService.java
+        symbol: acquire
     tests:
       - path: backend/src/test/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetrieverActiveVersionTest.java
         symbol: emptyActiveVersionSetReturnsEmptyWithoutEmbeddingOrFallback
 
   D8:
     kind: decision
-    description: 本次不可变 scope 是否包含至少一个 ACTIVE version
+    description: 本次服务端确认的 scope 是否包含至少一个可读版本
     condition: scope.activeVersionIds is not empty
     code:
       - path: backend/src/main/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetriever.java
@@ -114,7 +114,7 @@ nodes:
 
   A12:
     kind: action
-    description: 没有 ACTIVE version 时返回带 NO_ACTIVE_VERSION 诊断的合法空检索结果
+    description: 空范围返回合法空检索结果；沿用 NO_ACTIVE_VERSION 兼容诊断值
     code:
       - path: backend/src/main/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetriever.java
         symbol: retrieveWithResult
@@ -594,7 +594,7 @@ nodes:
 
   A29:
     kind: action
-    description: SSE 把固定本地响应作为一个 delta 发送并正常 complete
+    description: SSE 准备固定本地响应，经过 T1/T2 最终复核及保存后才发送
     code:
       - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
         symbol: stream
@@ -686,7 +686,7 @@ nodes:
 
   A10:
     kind: action
-    description: 累积模型内容并把每个片段转发为 delta SSE 事件
+    description: 缓冲完整模型候选，不提前输出答案；后续经过 T1/T2 保存才可发送
     code:
       - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
         symbol: stream
@@ -707,16 +707,16 @@ nodes:
 
   T1:
     kind: transition
-    description: 模型答案或本地决策响应完整成功后追加本轮用户消息
+    description: 完整候选复核会话资料资格后，在事务内追加用户消息
     entity: Chat turn messages
     from: NO_NEW_TURN_MESSAGES
     to: USER_MESSAGE_PERSISTED
     trigger: response_completed_successfully
     code:
       - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
-        symbol: appendCompletedTurn
+        symbol: completeTurn
       - path: backend/src/main/java/com/rag/backend/agent/history/MyBatisChatHistoryService.java
-        symbol: appendMessage
+        symbol: appendTurn
     tests:
       - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceCharacterizationTest.java
         symbol: currentHappyPathRetrievesBeforeCallingModelAndThenWritesHistory
@@ -727,16 +727,16 @@ nodes:
 
   T2:
     kind: transition
-    description: 用户消息后追加完整助手答案
+    description: 同事务追加完整助手答案及版本引用并提交；失败则连同用户消息回滚
     entity: Chat turn messages
     from: USER_MESSAGE_PERSISTED
     to: SUCCESS_PAIR_PERSISTED
     trigger: append_user_succeeded
     code:
       - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
-        symbol: appendCompletedTurn
+        symbol: completeTurn
       - path: backend/src/main/java/com/rag/backend/agent/history/MyBatisChatHistoryService.java
-        symbol: appendMessage
+        symbol: appendTurn
     tests:
       - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceCharacterizationTest.java
         symbol: currentHappyPathRetrievesBeforeCallingModelAndThenWritesHistory
@@ -785,14 +785,14 @@ nodes:
 
   G2:
     kind: safeguard
-    description: 单次解析不可变 scope 且 Dense 与 Lexical 共享同一 ACTIVE 版本集合
+    description: 同一会话复用版本集合且 Dense 与 Lexical 共用同一范围
     safeguard_type: validation
-    guarantee: 同一请求的 source 使用相同 ACTIVE-version 快照；非 ACTIVE、过期或串版 Chunk 不会进入 Fusion、Rerank、Prompt 或 references
+    guarantee: source 共享会话合法绑定的可读版本；允许被保留的 SUPERSEDED，拒绝失效或串版证据
     protects: [A4, A13, A15]
-    failure_behavior: 没有 ACTIVE 版本直接返回空；版本不匹配候选被丢弃
+    failure_behavior: 范围为空正常返回空；会话范围正文缺失或串版全路失败；非会话兼容入口仍丢弃越界候选
     code:
       - path: backend/src/main/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetriever.java
-        symbol: retrieveWithResult
+        symbol: retrieveInScope
       - path: backend/src/main/java/com/rag/backend/agent/retrieval/DenseCandidateSource.java
         symbol: retrieve
       - path: backend/src/main/java/com/rag/backend/agent/retrieval/MySqlLexicalCandidateSource.java
@@ -802,6 +802,8 @@ nodes:
         symbol: emptyActiveVersionSetReturnsEmptyWithoutEmbeddingOrFallback
       - path: backend/src/test/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetrieverActiveVersionTest.java
         symbol: mysqlRecheckDropsCandidateFromAStaleVersion
+      - path: backend/src/test/java/com/rag/backend/agent/materials/SessionMaterialServiceTest.java
+        symbol: oldSessionSurvivesPublicationAndServiceRestartWhileNewSessionUsesNewVersion
 
   G5:
     kind: safeguard
@@ -809,7 +811,7 @@ nodes:
     safeguard_type: rollout
     guarantee: 默认配置无需人工开启即可走 Hybrid；显式 false 保持 Dense-only；Hybrid 仅双路非空才 RRF，单路失败或为空时保留成功路原始顺序与分数
     protects: [D9, A16, A17]
-    failure_behavior: 一路异常安全记录诊断并 fail-open；两路异常 fail-closed；合法空 batch 不标记 degraded
+    failure_behavior: 普通单路技术异常允许同范围降级；MaterialScopeException 立即全路失败；合法空不标记 degraded
     code:
       - path: backend/src/main/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetriever.java
         symbol: retrieveWithResult
@@ -1017,19 +1019,24 @@ nodes:
     kind: safeguard
     description: 同步与 SSE 共享决策和成功历史语义
     safeguard_type: atomicity
-    guarantee: 两种入口共用 prepare；模型或本地响应完整成功后保存实际 user/assistant 文本，SSE 仅在 Flux 正常 complete 后保存并发送 done
+    guarantee: 两种入口共用 prepare；完整候选通过最终资料复核后原子保存消息对及引用，SSE 保存后才输出答案
     protects: [D19, T1, T2]
-    failure_behavior: Flux error 不写成功消息对；两次 append 仍非跨调用原子事务
+    failure_behavior: 上游 error 或复核失败不写成功消息对；保存失败整体回滚；提交后的网络投递失败不回滚
     code:
       - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
         symbol: prepare
       - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
-        symbol: appendCompletedTurn
+        symbol: completeTurn
     tests:
       - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceEvidenceDecisionTest.java
         symbol: clarifySkipsPromptAndModelButPersistsTheCompletedLocalTurn
       - path: backend/src/test/java/com/rag/backend/agent/chat/RagChatServiceCharacterizationTest.java
         symbol: streamingEmptyRetrievalRefusesLocallyAndWritesHistoryAfterCompletion
+
+      - path: backend/src/test/java/com/rag/backend/agent/materials/SessionMaterialServiceTest.java
+        symbol: failedEvidenceSerializationRollsBackBothMessages
+      - path: backend/src/test/java/com/rag/backend/agent/materials/SessionMaterialServiceTest.java
+        symbol: sseBuffersLateCandidateAndEmitsOnlyErrorAfterWithdrawal
 
   G3:
     kind: safeguard
@@ -1277,7 +1284,7 @@ nodes:
 
   A37:
     kind: action
-    description: 严格 SSE 在完整校验后发送最终 metadata 与一个已验证 delta
+    description: 严格 SSE 在完整生成校验后提供最终 metadata 和候选，再经过 T1/T2 资料复核及保存后输出答案
     code:
       - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
         symbol: stream

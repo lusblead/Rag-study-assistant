@@ -74,6 +74,9 @@ export type IngestionJob = {
 };
 
 export type RetrievedChunk = {
+  documentVersionId?: number | null;
+  documentName?: string;
+  sourcePage?: number;
   chunkId: number;
   documentId: number;
   title?: string;
@@ -107,6 +110,7 @@ export type EvidenceDecisionMetadata = {
 };
 
 export type RagChatMetadata = {
+  materials?: MaterialStatus;
   evidenceDecision: EvidenceDecisionMetadata;
   retrieval: {
     degraded: boolean;
@@ -164,11 +168,21 @@ export type ChatSession = {
 };
 
 export type ChatMessage = {
+  evidenceJson?: string | null;
   id: number;
   sessionId: number;
   role: "user" | "assistant" | string;
   content: string;
   createdAt?: string;
+};
+
+export type MaterialStatus = {
+  sessionId: number;
+  state: "UNBOUND" | "READY" | "UNAVAILABLE";
+  reason?: string | null;
+  updateAvailable: boolean;
+  expiresAt?: string | null;
+  versions: Array<{ documentId: number; documentVersionId: number; versionNo: number; documentName: string }>;
 };
 
 export type SubjectType = "general" | "chinese";

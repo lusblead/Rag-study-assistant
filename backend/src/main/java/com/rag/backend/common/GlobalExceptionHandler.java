@@ -6,6 +6,13 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+    @ExceptionHandler(com.rag.backend.agent.materials.MaterialScopeException.class)
+    public ResponseEntity<Result<java.util.Map<String, String>>> handleMaterialScope(
+            com.rag.backend.agent.materials.MaterialScopeException error) {
+        Result<java.util.Map<String, String>> result = Result.fail(409, error.getMessage());
+        result.setData(java.util.Map.of("code", "MATERIAL_SCOPE_UNAVAILABLE", "reason", error.reason()));
+        return ResponseEntity.status(409).body(result);
+    }
 
     // -- 业务异常 ---------------------------------------------------
     @ExceptionHandler(BizException.class)

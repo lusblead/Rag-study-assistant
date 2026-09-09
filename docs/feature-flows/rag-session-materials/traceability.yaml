@@ -1,0 +1,337 @@
+version: 1
+feature_id: "rag.session-materials"
+title: "会话资料版本保持与安全回收"
+status: "implemented"
+characteristics:
+  cross_component: true
+  asynchronous: true
+  persisted_state: true
+  external_dependencies: true
+  retry_or_compensation: true
+  security_sensitive: true
+nodes:
+  E1:
+    kind: "entry"
+    description: "会话问答"
+    trigger: "POST /api/agent/chat and /stream"
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: "prepare"
+  A1:
+    kind: "action"
+    description: "锁会话及文档并加载清单"
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/materials/SessionMaterialService.java
+        symbol: "acquire"
+  D1:
+    kind: "decision"
+    description: "检查读取资格"
+    condition: "会话课程匹配、未过期、版本 READABLE 且正文数量完整"
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/materials/SessionMaterialService.java
+        symbol: "checkedStatus"
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/materials/SessionMaterialServiceTest.java
+        symbol: "courseMismatchCreatesNoScopeAndStatusDoesNotRenewRetention"
+      - path: backend/src/test/java/com/rag/backend/agent/materials/SessionMaterialServiceTest.java
+        symbol: "missingBodyIsNotReportedAsOrdinaryNoHitOrWithdrawal"
+  T1:
+    kind: "transition"
+    description: "绑定会话并登记读取"
+    entity: "chat_material_scopes"
+    from: "UNBOUND"
+    to: "BOUND"
+    trigger: "首次合法检索"
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/materials/SessionMaterialService.java
+        symbol: "acquire"
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/materials/SessionMaterialServiceTest.java
+        symbol: "firstConcurrentRequestsBindOnce"
+      - path: backend/src/test/java/com/rag/backend/agent/materials/SessionMaterialServiceTest.java
+        symbol: "oldSessionSurvivesPublicationAndServiceRestartWhileNewSessionUsesNewVersion"
+  A2:
+    kind: "action"
+    description: "同一范围检索和补查"
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/MilvusKnowledgeRetriever.java
+        symbol: "retrieveInScope"
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/SessionScopedRetrievalTest.java
+        symbol: "explicitScopeDoesNotResolveActiveVersionsAgainAcrossSupplementaryCalls"
+  D2:
+    kind: "decision"
+    description: "取数结束仍合法"
+    condition: "无致命范围异常且读取结束时校验仍通过"
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/materials/SessionMaterialService.java
+        symbol: "validate"
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/DualCandidateSourceCollector.java
+        symbol: "collect"
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/materials/SessionMaterialServiceTest.java
+        symbol: "withdrawalWaitsForRealReaderAndRejectsLateSubmission"
+      - path: backend/src/test/java/com/rag/backend/agent/retrieval/SessionScopedRetrievalTest.java
+        symbol: "missingPinnedBodyIsFatalEvenWhenLexicalSucceeds"
+  C1:
+    kind: "compensation"
+    description: "取数退出后释放持久读者"
+    restores_or_resolves: "已结束客户端读取不永久阻挡回收"
+    failure_behavior: "数据库释放失败保留记录并报错，由运维核对进程后处理"
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/materials/SessionMaterialService.java
+        symbol: "close"
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/materials/SessionMaterialServiceTest.java
+        symbol: "failedRetrievalReleasesProtectionAndSkipsProviderAndSuccessfulHistory"
+  T4:
+    kind: "transition"
+    description: "显式释放读取记录"
+    entity: "material_readers"
+    from: "READING"
+    to: "RELEASED"
+    trigger: "取数执行退出（正常或异常）"
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/materials/SessionMaterialService.java
+        symbol: "close"
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/materials/SessionMaterialServiceTest.java
+        symbol: "retentionAndInFlightProtectionBothPrecedeReclamation"
+  A3:
+    kind: "action"
+    description: "生成后复核、提交证据与消息"
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/chat/RagChatService.java
+        symbol: "completeTurn"
+      - path: backend/src/main/java/com/rag/backend/agent/history/MyBatisChatHistoryService.java
+        symbol: "appendTurn"
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/materials/SessionMaterialServiceTest.java
+        symbol: "chatPersistsVersionedReferencesAndRestoresThemWithHistory"
+      - path: backend/src/test/java/com/rag/backend/agent/materials/SessionMaterialServiceTest.java
+        symbol: "failedEvidenceSerializationRollsBackBothMessages"
+      - path: backend/src/test/java/com/rag/backend/agent/materials/SessionMaterialServiceTest.java
+        symbol: "sseBuffersLateCandidateAndEmitsOnlyErrorAfterWithdrawal"
+  E2:
+    kind: "entry"
+    description: "普通旧版回收调度"
+    trigger: "MaterialReclamationScheduler.collect"
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/materials/MaterialReclamationScheduler.java
+        symbol: "collect"
+  D3:
+    kind: "decision"
+    description: "普通换代的保留已结束"
+    condition: "SUPERSEDED 且最短保留期已到且无有效会话引用"
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/materials/MaterialReclamationService.java
+        symbol: "reclaim"
+      - path: backend/src/main/java/com/rag/backend/agent/materials/MaterialReclamationService.java
+        symbol: "awaitDocumentReaders"
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/materials/SessionMaterialServiceTest.java
+        symbol: "retentionAndInFlightProtectionBothPrecedeReclamation"
+      - path: backend/src/test/java/com/rag/backend/agent/materials/SessionMaterialServiceTest.java
+        symbol: "deletedSessionDoesNotEraseAnInFlightReader"
+  T2:
+    kind: "transition"
+    description: "禁止新的旧版本读取"
+    entity: "document_versions.read_status"
+    from: "READABLE"
+    to: "RETIRING"
+    trigger: "符合普通回收资格"
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/materials/MaterialReclamationService.java
+        symbol: "reclaim"
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/materials/SessionMaterialServiceTest.java
+        symbol: "retentionAndInFlightProtectionBothPrecedeReclamation"
+  D4:
+    kind: "decision"
+    description: "在途读取全部退出"
+    condition: "material_readers 对应版本或文档 COUNT 为零"
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/materials/MaterialReclamationService.java
+        symbol: "readerCount"
+      - path: backend/src/main/java/com/rag/backend/agent/materials/MaterialReclamationService.java
+        symbol: "awaitDocumentReaders"
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/materials/SessionMaterialServiceTest.java
+        symbol: "crashedReaderNeverExpiresJustBecauseSessionDoes"
+      - path: backend/src/test/java/com/rag/backend/agent/materials/MaterialDeletionEntryTest.java
+        symbol: "waitingForReadersDefersJobWithoutExhaustingFailureRetries"
+  A4:
+    kind: "action"
+    description: "幂等删除各存储"
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/materials/MaterialReclamationService.java
+        symbol: "reclaim"
+      - path: backend/src/main/java/com/rag/backend/ingestionlab/delete/DeleteSaga.java
+        symbol: "execute"
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/materials/SessionMaterialServiceTest.java
+        symbol: "failedExternalDeletionIsResumableWithoutReopeningAdmission"
+    external_call:
+      system: "Milvus and local ArtifactStore"
+      timeout: "Milvus ingestion.milvus.rpc-deadline-ms defaults to 30000; local filesystem uses OS I/O with no application timeout"
+      failure_behavior: "GC preserves RETIRING and retries once next cycle; DELETE uses existing bounded job retry, while reader waits do not consume failure attempts"
+      failure_nodes: ["C2","X4"]
+  C2:
+    kind: "compensation"
+    description: "外部删除失败保留关闭入口状态"
+    restores_or_resolves: "不重新开放部分删除的版本，后续幂等重放"
+    failure_behavior: "记录版本 ID 与失败类型；GC 下轮重试，DELETE 耗尽失败预算则等待运维"
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/materials/MaterialReclamationScheduler.java
+        symbol: "collect"
+      - path: backend/src/main/java/com/rag/backend/ingestionlab/delete/DeleteJobWorker.java
+        symbol: "run"
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/materials/SessionMaterialServiceTest.java
+        symbol: "failedExternalDeletionIsResumableWithoutReopeningAdmission"
+  D5:
+    kind: "decision"
+    description: "最终复核与保存是否成功"
+    condition: "生成结束后的原版资格有效且消息与引用事务提交成功"
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/materials/SessionMaterialService.java
+        symbol: "complete"
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/materials/SessionMaterialServiceTest.java
+        symbol: "failedEvidenceSerializationRollsBackBothMessages"
+      - path: backend/src/test/java/com/rag/backend/agent/materials/SessionMaterialServiceTest.java
+        symbol: "synchronousLateAnswerAfterWithdrawalNeverBecomesSuccessfulHistory"
+  D6:
+    kind: "decision"
+    description: "外部清理是否成功"
+    condition: "指定版本的向量和制品均完成幂等删除，无运行异常"
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/materials/MaterialReclamationService.java
+        symbol: "reclaim"
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/materials/SessionMaterialServiceTest.java
+        symbol: "failedExternalDeletionIsResumableWithoutReopeningAdmission"
+  E4:
+    kind: "entry"
+    description: "已有文档墓碑对应的 DELETE Job"
+    trigger: "DeleteRequestService 已在短事务提交 DELETING、Job 和 Outbox 后调度 DeleteJobWorker.run"
+    code:
+      - path: backend/src/main/java/com/rag/backend/ingestionlab/delete/DeleteRequestService.java
+        symbol: "request"
+      - path: backend/src/main/java/com/rag/backend/ingestionlab/delete/DeleteJobWorker.java
+        symbol: "run"
+    tests:
+      - path: backend/src/test/java/com/rag/backend/ingestionlab/delete/DeleteRequestServiceTest.java
+        symbol: "tombstoneJobAndOutboxAreCreatedInThatOrder"
+  D7:
+    kind: "decision"
+    description: "入口决定提交单版本回收还是整文档删除终态"
+    condition: "当前操作来自 MaterialReclamationService 或 DeleteSaga"
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/materials/MaterialReclamationService.java
+        symbol: "reclaim"
+      - path: backend/src/main/java/com/rag/backend/ingestionlab/delete/DeleteSaga.java
+        symbol: "execute"
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/materials/SessionMaterialServiceTest.java
+        symbol: "failedExternalDeletionIsResumableWithoutReopeningAdmission"
+      - path: backend/src/test/java/com/rag/backend/agent/materials/MaterialDeletionEntryTest.java
+        symbol: "releasedReadersAllowOrderedDeletionAndFinalTombstoneCompletion"
+  T6:
+    kind: "transition"
+    description: "文档整体清理完成"
+    entity: "documents.lifecycle_status"
+    from: "DOCUMENT_DELETING"
+    to: "DOCUMENT_DELETED"
+    trigger: "DELETE Job 通过读者检查且依次完成全部物理清理"
+    code:
+      - path: backend/src/main/java/com/rag/backend/ingestionlab/delete/MyBatisDeletePort.java
+        symbol: "markDeleted"
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/materials/MaterialDeletionEntryTest.java
+        symbol: "releasedReadersAllowOrderedDeletionAndFinalTombstoneCompletion"
+  T3:
+    kind: "transition"
+    description: "完成旧版回收"
+    entity: "document_versions.read_status"
+    from: "RETIRING"
+    to: "DELETED"
+    trigger: "向量及制品清理成功后原子删除正文和标记"
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/materials/MaterialReclamationService.java
+        symbol: "reclaim"
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/materials/SessionMaterialServiceTest.java
+        symbol: "failedExternalDeletionIsResumableWithoutReopeningAdmission"
+  E3:
+    kind: "entry"
+    description: "恢复会话和引用"
+    trigger: "GET /api/agent/chat/sessions/{sessionId}/materials and /references/{chunkId}"
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/materials/SessionMaterialController.java
+        symbol: "reference"
+      - path: frontend/src/pages/ChatPage.vue
+        symbol: "openSession"
+  A5:
+    kind: "action"
+    description: "还原原始版本并确认可读"
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/materials/SessionMaterialController.java
+        symbol: "reference"
+      - path: frontend/src/components/ReferencesList.vue
+        symbol: "loadReference"
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/materials/SessionMaterialServiceTest.java
+        symbol: "referenceReadsRejectAnotherVersionAndNeverJumpToLatest"
+      - path: frontend/src/session-materials.test.mjs
+        symbol: "restored reference reads the exact bound version and handles deletion visibly"
+  G1:
+    kind: "safeguard"
+    description: "读取登记与回收互斥裁决"
+    safeguard_type: "concurrency"
+    guarantee: "先登记读者则删除等待；先关闭入口则新读者不能进入"
+    protects: ["T1","T2"]
+    failure_behavior: "READ_COMMITTED 短事务锁冲突等待或失败，不越过门禁"
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/materials/SessionMaterialService.java
+        symbol: "lockCourseDocuments"
+      - path: backend/src/main/java/com/rag/backend/agent/materials/MaterialReclamationService.java
+        symbol: "reclaim"
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/materials/SessionMaterialServiceTest.java
+        symbol: "cleanupAndRegistrationShareTheDocumentLock"
+      - path: backend/src/test/java/com/rag/backend/agent/materials/SessionMaterialServiceTest.java
+        symbol: "withdrawalWaitsForRealReaderAndRejectsLateSubmission"
+  G2:
+    kind: "safeguard"
+    description: "失效结果不得降级输出"
+    safeguard_type: "validation"
+    guarantee: "已确认失效的取数和迟到模型候选不作为成功答案提交"
+    protects: ["D2","A3"]
+    failure_behavior: "返回资料失效；SSE 无答案 delta 和成功历史"
+    code:
+      - path: backend/src/main/java/com/rag/backend/agent/retrieval/DualCandidateSourceCollector.java
+        symbol: "collect"
+      - path: backend/src/main/java/com/rag/backend/agent/materials/SessionMaterialService.java
+        symbol: "complete"
+    tests:
+      - path: backend/src/test/java/com/rag/backend/agent/materials/SessionMaterialServiceTest.java
+        symbol: "sseBuffersLateCandidateAndEmitsOnlyErrorAfterWithdrawal"
+      - path: backend/src/test/java/com/rag/backend/agent/materials/SessionMaterialServiceTest.java
+        symbol: "synchronousLateAnswerAfterWithdrawalNeverBecomesSuccessfulHistory"
+  X1:
+    kind: "outcome"
+    description: "阻断或技术失败"
+    result: "HTTP 409 资料原因枚举或通用技术失败；不写成功历史"
+  X2:
+    kind: "outcome"
+    description: "有版本依据的结果"
+    result: "原版资料和独立更新状态；历史引用不跳新版"
+  X3:
+    kind: "outcome"
+    description: "安全等待"
+    result: "保留正文与向量；DELETE 读者等待不扣重试次数"
+  X4:
+    kind: "outcome"
+    description: "回收完成或待重试"
+    result: "清理成功 DELETED；失败 RETIRING 待下轮幂等重放"

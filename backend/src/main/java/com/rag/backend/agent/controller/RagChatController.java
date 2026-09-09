@@ -81,7 +81,7 @@ public class RagChatController {
         try {
             response = ragChatService.stream(request.getCourseId(), request.getSessionId(), request.getQuestion());
         } catch (Exception e) {
-            boolean delivered = send(emitter, "error", STREAM_ERROR_PAYLOAD);
+            boolean delivered = send(emitter, "error", errorPayload(e));
             recordTerminal(
                     asyncCarrier,
                     delivered ? "error" : "send_failed",
@@ -195,7 +195,7 @@ public class RagChatController {
                                 span.error(error);
                                 serverTerminal.set(true);
                                 if (send(emitter, "error",
-                                        STREAM_ERROR_PAYLOAD)) {
+                                        errorPayload(error))) {
                                     span.result("sent");
                                 } else {
                                     span.result("send_failed");
@@ -286,6 +286,13 @@ public class RagChatController {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    private Map<String, String> errorPayload(Throwable error) {
+        if (error instanceof com.rag.backend.agent.materials.MaterialScopeException material) {
+            return Map.of("code", "MATERIAL_SCOPE_UNAVAILABLE", "reason", material.reason(), "message", material.getMessage());
+        }
+        return STREAM_ERROR_PAYLOAD;
     }
 
     /** 测试可替换发送边界；生产仍使用无限应用层超时的标准 emitter。 */

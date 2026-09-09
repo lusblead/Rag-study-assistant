@@ -187,6 +187,11 @@ Content-Type: application/json
 DELETE /api/courses/{id}
 ```
 
+仍有未清理文档时，先为文档登记安全删除任务，提交后返回 HTTP `409`：
+“课程资料已进入安全删除队列，请待文档清理完成后再次删除课程。”
+这不是回滚：文档已撤回，后台等待在途取数退出后清理。所有文档清理完成后，客户端再次
+请求才删除课程元数据。后台任务失败时应先处理失败任务，不能绕过等待直接删库。
+
 ---
 
 ## 三、文档接口
@@ -505,6 +510,11 @@ Content-Type: application/json
 | `retrieval.rerank` | 请求与实际 reranker、降级与失败原因、可选 `appliedThreshold` 与 `compositeVersion`、候选数和 `latencyNanos` |
 | `retrieval.diversity` | 后端对象还可序列化多样性选择诊断：`enabled`、`strategy`、可选 `lambda`、输入/输出候选数、冗余度、唯一文档数和 `latencyNanos`；当前前端 `RagChatMetadata` 类型未声明该子对象，客户端不应依赖它 |
 | `grounding` | `status`（`NOT_APPLICABLE` / `DISABLED` / `ACCEPTED` / `REPAIRED` / `REJECTED`）、`generationAttempts`、引用与 claim 计数、`sourceIds`；`citationValid`、`citationCoverage`、`failureReason`、`validatorVersion`、`semanticJudgeCalibrationId` 可为 `null` 或缺失 |
+| `materials` | 生产会话路径的 `sessionId`、`state`、`reason`、`updateAvailable`、`expiresAt`、`versions`；清单中每项包含 `documentId`、`documentVersionId`、`versionNo`、`documentName` |
+
+首次问答固定服务端确认的“文档→版本”清单，后续复用，不静默追随 ACTIVE 更新。
+`references` 的每项附带 `documentVersionId`；消息历史的 `evidenceJson` 保存原始
+`references` 与 `metadata`。无绑定的旧会话不得凭旧消息反推版本，继续提问会返回资料失效错误。
 
 ### 7.2 流式问答（SSE）
 
@@ -516,6 +526,11 @@ Content-Type: application/json
 
 请求体与同步问答相同。服务端依次发送 `session`、`references`、`metadata` 事件，再发送零个或多个 `delta`，成功结束发送 `done`。`metadata` 的 `data` 是与同步响应 `metadata` 相同的 JSON 对象，不包裹在 `Result` 信封中；其字段与可选性遵循 7.1。
 
+生产会话路径现在缓冲完整候选，生成结束后复核资料资格并原子保存消息对，再发送一个完整
+答案 `delta`。不再逐 token 提前输出，首个答案内容的等待时间因此增加。模型阶段出错或在
+提交前发现资料失效，不发送答案 `delta`，也不保存成功消息对。提交后发生的网络断开不能
+回滚已经保存的历史；收到初始 `references` 或 `metadata` 不等于答案已成功提交。
+
 | SSE event | `data` |
 |------|------|
 | `session` | `{ "sessionId": 12 }` |
@@ -525,7 +540,34 @@ Content-Type: application/json
 | `done` | `"[DONE]"` |
 | `error` | `{ "code": "CHAT_STREAM_FAILED", "message": "聊天处理失败，请稍后重试" }` |
 
+明确资料失效时，`error` 改为
+`{ "code": "MATERIAL_SCOPE_UNAVAILABLE", "reason": "DOCUMENT_WITHDRAWN", "message": "..." }`。
+临时服务异常仍使用通用脱敏错误，不冒充资料删除；普通无命中走既有无证据决策。
+
 客户端应将 `metadata` 视为诊断信息，而不是业务成功、检索质量或生产可用性的证明。
+
+### 7.3 会话资料状态与原版本引用
+
+| 请求 | 结果与副作用 |
+|---|---|
+| `POST /api/agent/chat/sessions?courseId=1` | 创建空会话，返回 `data.sessionId`；资料清单在首次检索时建立，而不是创建时建立 |
+| `GET /api/agent/chat/sessions/12/materials?courseId=1` | 返回 `MaterialStatus`，只查询、不绑定、不续期 |
+| `GET /api/agent/chat/sessions/12/references/100?courseId=1&documentVersionId=7` | 核验会话资格及准确版本后返回 `KnowledgeChunk`；有效引用读取会续期并登记短时取数保护 |
+
+状态 `UNBOUND` 表示尚未首次检索，`READY` 表示清单仍可用，`UNAVAILABLE` 表示不可继续。
+`updateAvailable=true` 只提示活动清单发生变化，不能据此自动换版本。前端在恢复会话及每轮
+问答时更新状态，常驻提示区显示清单；本轮没有页面空闲期间的主动推送。
+
+失效原因：`LEGACY_SESSION_UNBOUND`（旧消息无绑定）、`RETENTION_EXPIRED`（会话到期）、
+`DOCUMENT_WITHDRAWN`（整份文档撤回）、`VERSION_UNAVAILABLE`（原版本不可读）、
+`EVIDENCE_MISSING`（正文缺失或串版）。状态接口仍以 HTTP 200 返回状态；实际问答或引用
+取数遇到失效则返回 HTTP 409，`data` 包含 `code=MATERIAL_SCOPE_UNAVAILABLE` 和 `reason`。
+引用接口对预先发现的不可用状态统一拒绝为 `VERSION_UNAVAILABLE`，详细原因可查状态接口。
+越界引用返回 404，不回退最新版；会话不存在返回 404，课程不匹配返回 400。
+
+“使用当前可用资料开启新对话”创建独立历史，旧回答不作为新版已验证上下文继承。
+项目现有接口没有用户级鉴权；以上课程/会话校验不等于多租户访问控制。
+保留期、回收与运维见 [会话资料生命周期](session-material-lifecycle.md)。
 
 ---
 
@@ -546,6 +588,7 @@ Content-Type: application/json
 | 200 | 成功 |
 | 400 | 参数错误 / 业务异常 |
 | 404 | 资源不存在 |
+| 409 | 资料不可用或课程资料仍在安全删除队列 |
 | 500 | 服务器内部错误 |
 
 业务异常通过 `BizException` 抛出，可在任意层使用：

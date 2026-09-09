@@ -67,6 +67,12 @@ vector:
   provider: ${VECTOR_PROVIDER:milvus}
 
 rag:
+  materials:
+    # 首版运维默认值，可根据课程周期调整；状态查询不会续期。
+    session-retention: ${RAG_SESSION_RETENTION:P7D}
+    version-retention: ${RAG_VERSION_RETENTION:P7D}
+    cleanup-enabled: ${RAG_MATERIAL_CLEANUP_ENABLED:true}
+    cleanup-interval-ms: ${RAG_MATERIAL_CLEANUP_INTERVAL_MS:60000}
   top-k: ${RAG_TOP_K:5}
   # 每个召回源独立取候选；未单独配置时兼容旧 RAG_CANDIDATE_K。
   source-k:

@@ -36,7 +36,9 @@ public record CitationSource(String sourceId, RetrievedChunk chunk) {
         String page = sourcePage == null || sourcePage <= 0
                 ? ""
                 : "，第 " + sourcePage + " 页";
-        return "《" + documentName + "》" + page;
+        String version = chunk.documentVersionId() == null ? ""
+                : "，资料版本记录 " + chunk.documentVersionId();
+        return "《" + documentName + "》" + page + version;
     }
 
     private String firstNonBlank(

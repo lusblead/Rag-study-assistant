@@ -1,6 +1,7 @@
 package com.rag.backend.agent.retrieval;
 
 import com.rag.backend.agent.embedding.EmbeddingClient;
+import com.rag.backend.agent.materials.MaterialScopeException;
 import com.rag.backend.agent.model.KnowledgeChunk;
 import com.rag.backend.agent.repository.KnowledgeChunkRepository;
 import com.rag.backend.document.DocumentMapper;
@@ -82,10 +83,15 @@ public class DenseCandidateSource implements CandidateSource {
             }
             KnowledgeChunk chunk = chunkRepository.findById(hit.mysqlChunkId());
             if (chunk == null) {
+                if (scope.sessionBound()) throw new MaterialScopeException("EVIDENCE_MISSING");
                 continue;
             }
             if (enforceVersionGate && !isInsideScope(scope, hit, chunk)) {
+                if (scope.sessionBound()) throw new MaterialScopeException("EVIDENCE_MISSING");
                 continue;
+            }
+            if (scope.sessionBound() && (chunk.getContent() == null || chunk.getContent().isBlank())) {
+                throw new MaterialScopeException("EVIDENCE_MISSING");
             }
             RetrievedChunk retrieved = toRetrievedChunk(
                     chunk, hit.score(), documentNameCache);
@@ -104,6 +110,7 @@ public class DenseCandidateSource implements CandidateSource {
             KnowledgeChunk chunk) {
         Long versionId = chunk.getDocumentVersionId();
         return versionId != null
+                && java.util.Objects.equals(chunk.getCourseId(), scope.courseId())
                 && versionId == hit.documentVersionId()
                 && scope.activeVersionIds().contains(versionId);
     }
@@ -119,7 +126,7 @@ public class DenseCandidateSource implements CandidateSource {
                 chunk.getTitle(),
                 chunk.getContent(),
                 chunk.getSourcePage(),
-                score).withDenseScore(score);
+                score).withDocumentVersionId(chunk.getDocumentVersionId()).withDenseScore(score);
     }
 
     private String documentName(

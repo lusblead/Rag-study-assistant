@@ -10,8 +10,17 @@ import java.util.Objects;
 public record RagChatMetadata(
         EvidenceDecisionResult evidenceDecision,
         RetrievalDiagnostics retrieval,
-        GroundingDiagnostics grounding
+        GroundingDiagnostics grounding,
+        com.rag.backend.agent.materials.MaterialStatus materials
 ) {
+    public RagChatMetadata(EvidenceDecisionResult evidenceDecision, RetrievalDiagnostics retrieval,
+            GroundingDiagnostics grounding) {
+        this(evidenceDecision, retrieval, grounding, null);
+    }
+
+    public RagChatMetadata withMaterials(com.rag.backend.agent.materials.MaterialStatus materials) {
+        return new RagChatMetadata(evidenceDecision, retrieval, grounding, materials);
+    }
     public RagChatMetadata {
         evidenceDecision = Objects.requireNonNull(
                 evidenceDecision, "evidenceDecision");
@@ -28,6 +37,6 @@ public record RagChatMetadata(
 
     public RagChatMetadata withGrounding(
             GroundingDiagnostics grounding) {
-        return new RagChatMetadata(evidenceDecision, retrieval, grounding);
+        return new RagChatMetadata(evidenceDecision, retrieval, grounding, materials);
     }
 }

@@ -9,6 +9,17 @@ import java.util.List;
 @Mapper
 // IngestJobMapper：数据访问契约，关键写入依赖唯一键或条件更新。
 public interface IngestJobMapper {
+    /** Waiting for protected readers is not a failed deletion attempt. */
+    @Update("""
+        UPDATE ingest_jobs SET state='RETRY_WAIT', lease_owner=NULL, lease_until=NULL,
+          attempt=CASE WHEN attempt>0 THEN attempt-1 ELSE 0 END,
+          error_code='MATERIAL_READERS_ACTIVE', next_run_at=#{nextRunAt}, state_version=state_version+1
+        WHERE job_id=#{jobId} AND job_type='DELETE' AND state='RUNNING'
+          AND lease_owner=#{owner} AND lease_until>=#{now} AND state_version=#{expectedVersion}
+        """)
+    int deferDeleteForReaders(@Param("jobId") String jobId, @Param("owner") String owner,
+            @Param("expectedVersion") long expectedVersion, @Param("now") LocalDateTime now,
+            @Param("nextRunAt") LocalDateTime nextRunAt);
 
     // 创建任务时固定为 QUEUED；同一 version+jobType 的唯一键裁决并发重复创建。
     @Insert("""

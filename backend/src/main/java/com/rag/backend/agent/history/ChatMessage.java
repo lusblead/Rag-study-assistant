@@ -8,6 +8,9 @@ public class ChatMessage {
     public static final String ROLE_ASSISTANT = "assistant";
 
     private Long id;
+    private String evidenceJson;
+    public String getEvidenceJson() { return evidenceJson; }
+    public void setEvidenceJson(String value) { evidenceJson = value; }
     private Long sessionId;
     private String role;
     private String content;

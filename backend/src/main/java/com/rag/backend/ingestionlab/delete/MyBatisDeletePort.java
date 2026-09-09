@@ -13,6 +13,12 @@ import java.util.List;
 /** 把 Delete Saga 的四类幂等动作连接到 MySQL、向量库、制品目录和受控源文件。 */
 @Repository
 public class MyBatisDeletePort implements DeleteSaga.DeletePort {
+    private com.rag.backend.agent.materials.MaterialReclamationService reclamation;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setReclamation(com.rag.backend.agent.materials.MaterialReclamationService reclamation) {
+        this.reclamation = reclamation;
+    }
     private final DeleteRequestMapper documents;
     private final ConsistentVectorStore vectors;
     private final ArtifactStore artifacts;
@@ -31,6 +37,7 @@ public class MyBatisDeletePort implements DeleteSaga.DeletePort {
 
     @Override
     public DeleteSaga.DocumentToDelete loadTombstoned(long documentId) {
+        if (reclamation != null) reclamation.awaitDocumentReaders(documentId);
         DeleteRequestMapper.DeleteDocumentRow row =
                 documents.lockDocument(documentId);
         if (row == null) {

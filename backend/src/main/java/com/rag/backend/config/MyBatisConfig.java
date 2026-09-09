@@ -1,6 +1,6 @@
 package com.rag.backend.config;
 
-import org.apache.ibatis.logging.stdout.StdOutImpl;
+import org.apache.ibatis.logging.slf4j.Slf4jImpl;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.mybatis.spring.SqlSessionFactoryBean;
 import org.mybatis.spring.SqlSessionTemplate;
@@ -32,7 +32,8 @@ public class MyBatisConfig {
 
         org.apache.ibatis.session.Configuration configuration = new org.apache.ibatis.session.Configuration();
         configuration.setMapUnderscoreToCamelCase(true);
-        configuration.setLogImpl(StdOutImpl.class);
+        // SQL parameters now include persisted answer evidence. Keep them off stdout at default INFO.
+        configuration.setLogImpl(Slf4jImpl.class);
         factory.setConfiguration(configuration);
 
         return factory.getObject();

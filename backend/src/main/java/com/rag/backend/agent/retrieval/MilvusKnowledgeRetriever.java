@@ -259,7 +259,16 @@ public class MilvusKnowledgeRetriever implements KnowledgeRetriever {
         Set<Long> activeVersionIds = traces.inSpan(
                 "chat.retrieval.scope",
                 () -> activeVersions.forCourse(courseId));
-        if (activeVersionIds.isEmpty()) {
+        return retrieveInScope(new RetrievalScope(courseId, activeVersionIds), query, topK);
+    }
+
+    @Override
+    public RetrievalExecutionResult retrieveInScope(RetrievalScope scope, String query, int topK) {
+        if (query == null || query.isBlank()) {
+            throw new IllegalArgumentException("query must not be blank");
+        }
+        validateLimits(topK);
+        if (scope.activeVersionIds().isEmpty()) {
             DiversitySelectionResult emptySelection = traces.inSpan(
                     "chat.diversity",
                     () -> diversitySelector.select(List.of(), topK));
@@ -273,7 +282,6 @@ public class MilvusKnowledgeRetriever implements KnowledgeRetriever {
                             emptySelection.diagnostics()));
         }
 
-        RetrievalScope scope = new RetrievalScope(courseId, activeVersionIds);
         if (hybridEnabled) {
             return retrieveHybrid(scope, query, topK);
         }

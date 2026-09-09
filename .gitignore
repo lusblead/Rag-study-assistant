@@ -60,6 +60,8 @@ docs/feature-flows/*
 !docs/feature-flows/rag-public-small-offline-eval/**
 !docs/feature-flows/rag-question-answer/
 !docs/feature-flows/rag-question-answer/**
+!docs/feature-flows/rag-session-materials/
+!docs/feature-flows/rag-session-materials/**
 !docs/feature-flows/rag-layered-performance-baseline/
 !docs/feature-flows/rag-layered-performance-baseline/**
 *.zip

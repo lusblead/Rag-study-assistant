@@ -11,8 +11,18 @@ public record RetrievedChunk(
         String content,
         Integer sourcePage,
         Double score,
-        @JsonIgnore ChunkScores scores
+        @JsonIgnore ChunkScores scores,
+        Long documentVersionId
 ) {
+    public RetrievedChunk(Long chunkId, Long documentId, String documentName, String title,
+            String content, Integer sourcePage, Double score, ChunkScores scores) {
+        this(chunkId, documentId, documentName, title, content, sourcePage, score, scores, null);
+    }
+
+    public RetrievedChunk withDocumentVersionId(Long versionId) {
+        return new RetrievedChunk(chunkId, documentId, documentName, title,
+                content, sourcePage, score, scores, versionId);
+    }
     public RetrievedChunk {
         scores = scores == null ? ChunkScores.legacy(score) : scores;
         if (scores.finalScore() == null && score != null) {
@@ -68,6 +78,6 @@ public record RetrievedChunk(
 
     private RetrievedChunk withScores(ChunkScores newScores) {
         return new RetrievedChunk(chunkId, documentId, documentName, title,
-                content, sourcePage, newScores.finalScore(), newScores);
+                content, sourcePage, newScores.finalScore(), newScores, documentVersionId);
     }
 }
